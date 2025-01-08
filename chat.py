@@ -75,25 +75,6 @@ def get_multiline_input(client: 'ChatClient') -> str:
     
     return '\n'.join(lines)
 
-def generate_chat_title(messages: List[Dict]) -> str:
-    """Generate a descriptive title from the first user message, with timestamp first."""
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    if not messages:
-        return timestamp
-    
-    # Find first user message
-    first_msg = next((msg["content"] for msg in messages if msg["role"] == "user"), "")
-    
-    # Create title from first line or first few words
-    title = first_msg.split('\n')[0][:50].strip()
-    # Replace spaces and special characters with underscores
-    title = ''.join(c if c.isalnum() else '_' for c in title)
-    # Remove multiple consecutive underscores
-    title = '_'.join(filter(None, title.split('_')))
-    
-    return f"{timestamp}_{title}"
-
 class ChatClient:
     def __init__(self, base_url: str = "http://localhost:10000", token: str = None):
         self.base_url = base_url
@@ -156,27 +137,44 @@ class ChatClient:
             print(f"Error: {e}")
             return ""
 
-    def save_chat(self, chat_name: str = None) -> str:
-        if not chat_name:
-            chat_name = f"{generate_chat_title(self.messages)}.json"
+    def save_chat(self) -> str:
+        # Only generate summary when saving
+        summary = self.generate_summary()
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        chat_name = f"{timestamp}_{summary.replace(' ', '_')}.json"
         
         file_path = self.chat_dir / chat_name
         with open(file_path, 'w') as f:
             json.dump(self.messages, f, indent=2)
         return str(file_path)
-
-    def load_chat(self, chat_name: str) -> bool:
-        file_path = self.chat_dir / chat_name
+    
+    def generate_summary(self) -> str:
+        """Generate a summary of the chat messages."""
+        # Create a temporary copy of messages to avoid modifying the original
+        messages_copy = self.messages.copy()
+        summary_prompt = {
+            "role": "user",
+            "content": f"Please summarize the following conversation into a few words: {json.dumps(messages_copy)}"
+        }
+        
         try:
-            with open(file_path, 'r') as f:
-                self.messages = json.load(f)
-            return True
-        except (FileNotFoundError, json.JSONDecodeError):
-            return False
+            response = requests.post(
+                f"{self.base_url}/v1/chat/completions",
+                headers=self.headers,
+                json={
+                    "model": os.environ.get('LOCAL_OPENAI_API_MODEL'),
+                    "messages": [summary_prompt],  # Only send the summary prompt
+                    "stream": False  # No need to stream the summary
+                }
+            )
+            response.raise_for_status()
+            summary = response.json()['choices'][0]['message']['content']
+            return summary.strip()
+        except requests.exceptions.RequestException as e:
+            print(f"Error generating summary: {e}")
+            return "unnamed_chat"  # Fallback summary if generation fails
 
-    def list_chats(self) -> List[str]:
-        return [f.name for f in self.chat_dir.glob("*.json")]
-
+  
 def main():
     parser = argparse.ArgumentParser(description="CLI Chat Client for Local OpenAI API")
     parser.add_argument('--load', help='Load a previous chat file')
@@ -219,6 +217,7 @@ def main():
     
     signal.signal(signal.SIGINT, signal_handler)
 
+
     try:
         while True:
             user_input = get_multiline_input(client).strip()
@@ -226,8 +225,7 @@ def main():
             if user_input:
                 print("\nAssistant:", end=' ')
                 client.send_message(user_input)
-                # Autosave after each interaction
-                client.save_chat()
+                # Remove the autosave line that was here
 
     except EOFError:
         print("\nSaving chat and exiting...")
@@ -236,3 +234,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
