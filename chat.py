@@ -1,13 +1,98 @@
 #!/usr/bin/env python3
 
 import os
+import sys
 import json
 import argparse
 import datetime
 import readline
+import signal
 from pathlib import Path
 import requests
 from typing import List, Dict
+
+
+def get_multiline_input(client: 'ChatClient') -> str:
+    """Get multiline input from user. Submit on Ctrl+D."""
+    import termios
+    import sys, tty
+
+    print("\nYou: ", end='', flush=True)
+    lines = []
+    current_line = []
+    
+    # Save the terminal settings
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        # Set the terminal to raw mode
+        tty.setraw(sys.stdin.fileno())
+        
+        while True:
+            char = sys.stdin.read(1)
+            
+            if not char or ord(char) == 4:  # EOF or Ctrl+D
+                if current_line:
+                    lines.append(''.join(current_line))
+                print()
+                break
+                
+            elif ord(char) == 3:  # Ctrl+C
+                # Restore terminal settings first
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                print("\nSaving chat and exiting...")
+                # Save any unfinished input if it exists
+                if current_line or lines:
+                    if current_line:
+                        lines.append(''.join(current_line))
+                    final_input = '\n'.join(lines)
+                    if final_input.strip():
+                        client.messages.append({"role": "user", "content": final_input})
+                saved_path = client.save_chat()
+                print(f"Chat saved to: {saved_path}")
+                sys.exit(0)
+                
+            elif char == '\r' or char == '\n':
+                lines.append(''.join(current_line))
+                current_line = []
+                sys.stdout.write('\r\n')
+                sys.stdout.flush()
+                
+            elif ord(char) == 127:  # Backspace
+                if current_line:
+                    current_line.pop()
+                    sys.stdout.write('\b \b')
+                    sys.stdout.flush()
+                    
+            else:
+                current_line.append(char)
+                sys.stdout.write(char)
+                sys.stdout.flush()
+                
+    finally:
+        # Restore terminal settings
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    
+    return '\n'.join(lines)
+
+def generate_chat_title(messages: List[Dict]) -> str:
+    """Generate a descriptive title from the first user message, with timestamp first."""
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    if not messages:
+        return timestamp
+    
+    # Find first user message
+    first_msg = next((msg["content"] for msg in messages if msg["role"] == "user"), "")
+    
+    # Create title from first line or first few words
+    title = first_msg.split('\n')[0][:50].strip()
+    # Replace spaces and special characters with underscores
+    title = ''.join(c if c.isalnum() else '_' for c in title)
+    # Remove multiple consecutive underscores
+    title = '_'.join(filter(None, title.split('_')))
+    
+    return f"{timestamp}_{title}"
 
 class ChatClient:
     def __init__(self, base_url: str = "http://localhost:10000", token: str = None):
@@ -73,8 +158,7 @@ class ChatClient:
 
     def save_chat(self, chat_name: str = None) -> str:
         if not chat_name:
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            chat_name = f"chat_{timestamp}.json"
+            chat_name = f"{generate_chat_title(self.messages)}.json"
         
         file_path = self.chat_dir / chat_name
         with open(file_path, 'w') as f:
@@ -125,31 +209,30 @@ def main():
             print(f"Failed to load chat: {args.load}")
             return
 
-    print("Chat started. Type 'exit' to quit, 'save' to save the conversation.")
+    print("Chat started. Press Ctrl+D to submit message, Ctrl+C to exit.")
+    
+    def signal_handler(sig, frame):
+        print("\nSaving chat and exiting...")
+        saved_path = client.save_chat()
+        print(f"Chat saved to: {saved_path}")
+        exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+
     try:
         while True:
-            user_input = input("\nYou: ").strip()
+            user_input = get_multiline_input(client).strip()
             
-            if user_input.lower() == 'exit':
-                save = input("Save chat before exiting? (y/n): ").lower()
-                if save == 'y':
-                    filename = input("Enter filename (leave empty for timestamp): ").strip()
-                    saved_path = client.save_chat(filename if filename else None)
-                    print(f"Chat saved to: {saved_path}")
-                break
-                
-            elif user_input.lower() == 'save':
-                filename = input("Enter filename (leave empty for timestamp): ").strip()
-                saved_path = client.save_chat(filename if filename else None)
-                print(f"Chat saved to: {saved_path}")
-                continue
-                
-            elif user_input:
+            if user_input:
                 print("\nAssistant:", end=' ')
                 client.send_message(user_input)
+                # Autosave after each interaction
+                client.save_chat()
 
-    except KeyboardInterrupt:
-        print("\nExiting...")
+    except EOFError:
+        print("\nSaving chat and exiting...")
+        saved_path = client.save_chat()
+        print(f"Chat saved to: {saved_path}")
 
 if __name__ == "__main__":
     main()
