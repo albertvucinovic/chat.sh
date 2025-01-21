@@ -6,6 +6,7 @@ import json
 import argparse
 import datetime
 import readline
+import re
 import signal
 from pathlib import Path
 import requests
@@ -154,7 +155,7 @@ class ChatClient:
         messages_copy = self.messages.copy()
         summary_prompt = {
             "role": "user",
-            "content": f"Please summarize the following conversation into a few words: {json.dumps(messages_copy)}"
+            "content": f"Please summarize the following conversation into a few words (at most 20 words): {json.dumps(messages_copy)}"
         }
         
         try:
@@ -169,12 +170,14 @@ class ChatClient:
             )
             response.raise_for_status()
             summary = response.json()['choices'][0]['message']['content']
+            
+            # Remove <think>...</think> parts
+            summary = re.sub(r'<think>[\s\S]*?</think>', '', summary)
             return summary.strip()
         except requests.exceptions.RequestException as e:
             print(f"Error generating summary: {e}")
             return "unnamed_chat"  # Fallback summary if generation fails
 
-  
 def main():
     parser = argparse.ArgumentParser(description="CLI Chat Client for Local OpenAI API")
     parser.add_argument('--load', help='Load a previous chat file')
