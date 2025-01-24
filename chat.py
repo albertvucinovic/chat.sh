@@ -84,8 +84,16 @@ class ChatClient:
         
         self.chat_dir = Path.cwd() / "localChats"
         self.chat_dir.mkdir(parents=True, exist_ok=True)
-        self.messages: List[Dict] = [{"role": "system", "content": "Always include a summary of the conversation within <summary> tags at the end of your response."}]
+        self.messages: List[Dict] = [{"role": "system", "content": "Always include a summary of the conversation within <summary> tags at the end of your response. The summary should be maximum 10 words, and at least 3 words."}]
         self.summary = None
+
+    def extract_summary(self, text):
+        start = text.rfind('<summary>') + len('<summary>')
+        end = text.find('</summary>', start)
+        if start == -1 or end == -1:
+            return None
+        return text[start:end].strip()
+ 
         
     def send_message(self, message: str) -> str:
         self.messages.append({"role": "user", "content": message})
@@ -125,18 +133,8 @@ class ChatClient:
             full_reply = ''.join(collected_chunks)
             
             # Extract summary from the response
-            summary_start = full_reply.find('<summary>')
-            if summary_start != -1:
-                summary_end = full_reply.find('</summary>', summary_start)
-                if summary_end != -1:
-                    self.summary = full_reply[summary_start+9 : summary_end]
-                    main_reply = full_reply[:summary_start]
-                else:
-                    main_reply = full_reply
-                    self.summary = None
-            else:
-                main_reply = full_reply
-                self.summary = None
+            self.summary = self.extract_summary(full_reply)
+            main_reply = full_reply
                 
             self.messages.append({"role": "assistant", "content": main_reply})
             return main_reply
