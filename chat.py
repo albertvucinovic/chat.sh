@@ -14,7 +14,6 @@ from typing import List, Dict
 
 
 def get_multiline_input(client: 'ChatClient') -> str:
-    """Get multiline input from user. Submit on Ctrl+D."""
     import termios
     import sys, tty
 
@@ -22,27 +21,23 @@ def get_multiline_input(client: 'ChatClient') -> str:
     lines = []
     current_line = []
     
-    # Save the terminal settings
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
     try:
-        # Set the terminal to raw mode
         tty.setraw(sys.stdin.fileno())
         
         while True:
             char = sys.stdin.read(1)
             
-            if not char or ord(char) == 4:  # EOF or Ctrl+D
+            if not char or ord(char) == 4:
                 if current_line:
                     lines.append(''.join(current_line))
                 print()
                 break
                 
-            elif ord(char) == 3:  # Ctrl+C
-                # Restore terminal settings first
+            elif ord(char) == 3:
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
                 print("\nSaving chat and exiting...")
-                # Save any unfinished input if it exists
                 if current_line or lines:
                     if current_line:
                         lines.append(''.join(current_line))
@@ -59,7 +54,7 @@ def get_multiline_input(client: 'ChatClient') -> str:
                 sys.stdout.write('\r\n')
                 sys.stdout.flush()
                 
-            elif ord(char) == 127:  # Backspace
+            elif ord(char) == 127:
                 if current_line:
                     current_line.pop()
                     sys.stdout.write('\b \b')
@@ -71,7 +66,6 @@ def get_multiline_input(client: 'ChatClient') -> str:
                 sys.stdout.flush()
                 
     finally:
-        # Restore terminal settings
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
     
     return '\n'.join(lines)
@@ -90,7 +84,8 @@ class ChatClient:
         
         self.chat_dir = Path.cwd() / "localChats"
         self.chat_dir.mkdir(parents=True, exist_ok=True)
-        self.messages: List[Dict] = []
+        self.messages: List[Dict] = [{"role": "system", "content": "Always include a summary of the conversation within <summary> tags at the end of your response."}]
+        self.summary = None
         
     def send_message(self, message: str) -> str:
         self.messages.append({"role": "user", "content": message})
@@ -109,11 +104,8 @@ class ChatClient:
             
             response.raise_for_status()
             
-            # Initialize variables for streaming
             collected_chunks = []
-            collected_messages = []
             
-            # Process the streaming response
             for chunk in response.iter_lines():
                 if chunk:
                     chunk = chunk.decode('utf-8')
@@ -131,16 +123,30 @@ class ChatClient:
                                     
             print()  # New line after response
             full_reply = ''.join(collected_chunks)
-            self.messages.append({"role": "assistant", "content": full_reply})
-            return full_reply
+            
+            # Extract summary from the response
+            summary_start = full_reply.find('<summary>')
+            if summary_start != -1:
+                summary_end = full_reply.find('</summary>', summary_start)
+                if summary_end != -1:
+                    self.summary = full_reply[summary_start+9 : summary_end]
+                    main_reply = full_reply[:summary_start]
+                else:
+                    main_reply = full_reply
+                    self.summary = None
+            else:
+                main_reply = full_reply
+                self.summary = None
+                
+            self.messages.append({"role": "assistant", "content": main_reply})
+            return main_reply
             
         except requests.exceptions.RequestException as e:
             print(f"Error: {e}")
             return ""
 
     def save_chat(self) -> str:
-        # Only generate summary when saving
-        summary = self.generate_summary()
+        summary = self.summary if self.summary else "unnamed_chat"
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         chat_name = f"{timestamp}_{summary.replace(' ', '_')}.json"
         
@@ -148,35 +154,6 @@ class ChatClient:
         with open(file_path, 'w') as f:
             json.dump(self.messages, f, indent=2)
         return str(file_path)
-    
-    def generate_summary(self) -> str:
-        """Generate a summary of the chat messages."""
-        # Create a temporary copy of messages to avoid modifying the original
-        messages_copy = self.messages.copy()
-        summary_prompt = {
-            "role": "user",
-            "content": f"Please summarize the following conversation into a few words (at most 20 words): {json.dumps(messages_copy)}"
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/v1/chat/completions",
-                headers=self.headers,
-                json={
-                    "model": os.environ.get('LOCAL_OPENAI_API_MODEL'),
-                    "messages": [summary_prompt],  # Only send the summary prompt
-                    "stream": False  # No need to stream the summary
-                }
-            )
-            response.raise_for_status()
-            summary = response.json()['choices'][0]['message']['content']
-            
-            # Remove <think>...</think> parts
-            summary = re.sub(r'<think>[\s\S]*?</think>', '', summary)
-            return summary.strip()
-        except requests.exceptions.RequestException as e:
-            print(f"Error generating summary: {e}")
-            return "unnamed_chat"  # Fallback summary if generation fails
 
 def main():
     parser = argparse.ArgumentParser(description="CLI Chat Client for Local OpenAI API")
@@ -194,7 +171,7 @@ def main():
         return
 
     if args.list:
-        chats = client.list_chats()
+        chats = [chat.name for chat in client.chat_dir.iterdir() if chat.is_file()]
         if chats:
             print("Available chats:")
             for chat in chats:
@@ -204,10 +181,14 @@ def main():
         return
 
     if args.load:
-        if client.load_chat(args.load):
+        chat_file = client.chat_dir / args.load
+        if chat_file.exists():
+            with open(chat_file, 'r') as f:
+                loaded_messages = json.load(f)
+                client.messages = loaded_messages.copy()
             print(f"Loaded chat: {args.load}")
         else:
-            print(f"Failed to load chat: {args.load}")
+            print(f"Chat file not found: {args.load}")
             return
 
     print("Chat started. Press Ctrl+D to submit message, Ctrl+C to exit.")
@@ -220,7 +201,6 @@ def main():
     
     signal.signal(signal.SIGINT, signal_handler)
 
-
     try:
         while True:
             user_input = get_multiline_input(client).strip()
@@ -228,8 +208,7 @@ def main():
             if user_input:
                 print("\nAssistant:", end=' ')
                 client.send_message(user_input)
-                # Remove the autosave line that was here
-
+                
     except EOFError:
         print("\nSaving chat and exiting...")
         saved_path = client.save_chat()
