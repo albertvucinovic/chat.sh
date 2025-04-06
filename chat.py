@@ -47,6 +47,13 @@ def get_multiline_input(client: 'ChatClient') -> str:
                 saved_path = client.save_chat()
                 print(f"Chat saved to: {saved_path}")
                 sys.exit(0)
+
+            elif ord(char) == 5:  # Ctrl+E (ASCII code 5)
+                current_line = []
+                lines.clear()  # Clear all accumulated lines for this message
+                # Clear terminal display and reset prompt
+                sys.stdout.write('\r\x1b[2KYou: ')
+                sys.stdout.flush()
                 
             elif char == '\r' or char == '\n':
                 lines.append(''.join(current_line))
@@ -84,7 +91,7 @@ class ChatClient:
         
         self.chat_dir = Path.cwd() / "localChats"
         self.chat_dir.mkdir(parents=True, exist_ok=True)
-        self.messages: List[Dict] = [{"role": "system", "content": "Always include a summary of the conversation within <summary> tags at the end of your response. The summary should be maximum 10 words, and at least 3 words."}]
+        self.messages: List[Dict] = [{"role": "system", "content": "Always include a summary of the conversation within <summary> tags at the end of each of your responses. The summary should be maximum 10 words, and at least 3 words."}]
         self.summary = None
 
     def extract_summary(self, text):
@@ -177,7 +184,6 @@ def main():
         else:
             print("No saved chats found.")
         return
-
     if args.load:
         chat_file = client.chat_dir / args.load
         if chat_file.exists():
@@ -185,9 +191,20 @@ def main():
                 loaded_messages = json.load(f)
                 client.messages = loaded_messages.copy()
             print(f"Loaded chat: {args.load}")
+            
+            # Display the loaded conversation
+            print("\nPrevious conversation:")
+            for msg in client.messages:
+                if msg['role'] == 'system':
+                    continue  # Skip system messages
+                elif msg['role'] == 'user':
+                    print(f"\nYou: {msg['content']}")
+                elif msg['role'] == 'assistant':
+                    print(f"  Assistant: {msg['content']}\n")
         else:
             print(f"Chat file not found: {args.load}")
             return
+
 
     print("Chat started. Press Ctrl+D to submit message, Ctrl+C to exit.")
     

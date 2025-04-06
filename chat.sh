@@ -9,7 +9,7 @@ source $(dirname "$0")/.env
 
 pushd $(dirname "$0")
 # Run the Python script
-python $(dirname "$0")/chat.py
+python $(dirname "$0")/chat.py $@
 
 popd
 
