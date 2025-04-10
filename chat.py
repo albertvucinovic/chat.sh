@@ -54,6 +54,9 @@ def get_multiline_input(client: 'ChatClient') -> str:
                 # Clear terminal display and reset prompt
                 sys.stdout.write('\r\x1b[2KYou: ')
                 sys.stdout.flush()
+
+            elif ord(char) == 24: # Ctrl+X
+                sys.exit(0)
                 
             elif char == '\r' or char == '\n':
                 lines.append(''.join(current_line))
@@ -206,7 +209,7 @@ def main():
             return
 
 
-    print("Chat started. Press Ctrl+D to submit message, Ctrl+C to exit.")
+    print("Chat started. Press Ctrl+D to submit message, Ctrl+C to exit and save, Ctrl+X to exit without saving.")
     
     def signal_handler(sig, frame):
         print("\nSaving chat and exiting...")
