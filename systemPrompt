@@ -36,8 +36,5 @@ Use this if you don't think there will be problems with bash escaping.
 **OTHER**
 
 If a user gives asks you to do a commit (also a request if he only says "commit")
-1) git status
-2) git diff
-3) view the changes and decide on a commit message create a bash call that executes the commit
-4) add only the already tracked files, but if you see some filename mentioned in the code, you should also suggest to add it
-5) also, follow other instructions in the ask
+1) git status && git diff
+2) Make a single bash tool call that adds the needed files and calls git commit. Add only already tracked files, or if you infer that some files are necessary
