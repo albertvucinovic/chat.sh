@@ -314,53 +314,59 @@ class ChatClient:
             
         return text[start_index:end_index].strip()
  
-    def send_message(self, message: str) -> str:
+    def send_message(self, message: str):
         self.messages.append({"role": "user", "content": message})
         
-        try:
-            response = requests.post(
-                f"{self.base_url}/v1/chat/completions",
-                headers=self.headers,
-                json={
-                    "model": os.environ.get('LOCAL_OPENAI_API_MODEL'),
-                    "messages": self.messages,
-                    "stream": True
-                },
-                stream=True
-            )
-            response.raise_for_status()
-            
-            collected_chunks = []
-            for chunk in response.iter_lines():
-                if chunk:
-                    chunk = chunk.decode('utf-8')
-                    if chunk.startswith('data: '):
-                        chunk = chunk[6:]
-                        if chunk != '[DONE]':
-                            chunk_data = json.loads(chunk)
-                            choices = chunk_data.get('choices', [])
-                            if choices and 'content' in choices[0].get('delta', {}):
-                                content = choices[0]['delta']['content']
-                                print(content, end='', flush=True)
-                                collected_chunks.append(content)
-                                    
-            print()
-            full_reply = ''.join(collected_chunks)
-            final_reply_content = full_reply
-
-            tool_matches = []
-            bash_regex = r'```bash\n(.*?)\n```'
-            python_regex = r'```python\n(.*?)\n```'
-            
-            for match in re.finditer(bash_regex, full_reply, re.DOTALL):
-                tool_matches.append(('bash', match.group(1).strip()))
-            
-            for match in re.finditer(python_regex, full_reply, re.DOTALL):
-                tool_matches.append(('python', match.group(1).strip()))
-
-            if tool_matches:
+        while True:
+            try:
+                response = requests.post(
+                    f"{self.base_url}/v1/chat/completions",
+                    headers=self.headers,
+                    json={
+                        "model": os.environ.get('LOCAL_OPENAI_API_MODEL'),
+                        "messages": self.messages,
+                        "stream": True
+                    },
+                    stream=True
+                )
+                response.raise_for_status()
+                
+                collected_chunks = []
+                print("\n[Assistant]:", end=' ', flush=True)
+                for chunk in response.iter_lines():
+                    if chunk:
+                        chunk = chunk.decode('utf-8')
+                        if chunk.startswith('data: '):
+                            chunk = chunk[6:]
+                            if chunk != '[DONE]':
+                                chunk_data = json.loads(chunk)
+                                choices = chunk_data.get('choices', [])
+                                if choices and 'content' in choices[0].get('delta', {}):
+                                    content = choices[0]['delta']['content']
+                                    print(content, end='', flush=True)
+                                    collected_chunks.append(content)
+                                        
                 print()
+                full_reply = ''.join(collected_chunks)
+                
+                self.summary = self.extract_summary(full_reply)
+                self.messages.append({"role": "assistant", "content": full_reply})
+
+                tool_matches = []
+                bash_regex = r'```bash\n(.*?)\n```'
+                python_regex = r'```python\n(.*?)\n```'
+                
+                for match in re.finditer(bash_regex, full_reply, re.DOTALL):
+                    tool_matches.append(('bash', match.group(1).strip()))
+                
+                for match in re.finditer(python_regex, full_reply, re.DOTALL):
+                    tool_matches.append(('python', match.group(1).strip()))
+
+                if not tool_matches:
+                    return
+
                 all_outputs_for_history = ""
+                any_tool_executed = False
                 num_commands = len(tool_matches)
 
                 for i, (tool_type, script_to_run) in enumerate(tool_matches):
@@ -378,6 +384,7 @@ class ChatClient:
                         confirm = 'n'
 
                     if confirm == 'y':
+                        any_tool_executed = True
                         print("Executing...")
                         output = ""
                         if tool_type == 'bash':
@@ -389,17 +396,19 @@ class ChatClient:
                         all_outputs_for_history += f"\n\n--- SCRIPT {i+1} ({tool_type}) OUTPUT ---\n{output}"
                     else:
                         print("Execution skipped.")
+                        all_outputs_for_history += f"\n\n--- SCRIPT {i+1} ({tool_type}) SKIPPED BY USER ---"
                 
-                if all_outputs_for_history:
-                    final_reply_content += all_outputs_for_history
-            
-            self.summary = self.extract_summary(final_reply_content)
-            self.messages.append({"role": "assistant", "content": final_reply_content})
-            return final_reply_content
-            
-        except requests.exceptions.RequestException as e:
-            print(f"Error: {e}")
-            return ""
+                if any_tool_executed:
+                    tool_response_message = f"--- TOOL RESPONSE ---\n{all_outputs_for_history.strip()}"
+                    self.messages.append({"role": "user", "content": tool_response_message})
+                    # Loop will continue to get the next assistant response
+                else:
+                    print("\nAll proposed commands were skipped. It's your turn.")
+                    return # Return control to the user
+                
+            except requests.exceptions.RequestException as e:
+                print(f"\nError: {e}", file=sys.stderr)
+                return
 
     def send_context_only(self, message: str):
         self.messages.append({"role": "user", "content": message})
@@ -521,7 +530,6 @@ def main():
                     print("Empty bash command, skipping.")
                     continue
             
-            print("\n[Assistant]:", end=' ')
             client.send_message(user_input)
                 
     except EOFError:

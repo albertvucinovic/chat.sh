@@ -24,6 +24,7 @@ For python script calls, output:
 ```
 Use what you deem more appropriate, but USE TOOLS OFTEN!
 YOU CAN MAKE MULTIPLE TOOL CALLS IN A SINGLE RESPONSE.
+ALWAYS, ALWAYS, ALWAYS USE PROPER TOOL CALL SYNTAX LIKE SHOWN IN THIS FILE, MARKDOWN STYLE.
 
 For example:
 If a user asks to edit a file, you can also use a bash script that when run, replaces the whole file.
