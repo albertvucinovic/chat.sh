@@ -121,7 +121,6 @@ class ChatClient:
         self.chat_dir = Path.cwd() / "localChats"
         self.chat_dir.mkdir(parents=True, exist_ok=True)
         
-        # Load system prompt from file
         try:
             script_dir = Path(__file__).resolve().parent
             system_prompt_path = script_dir / "systemPrompt"
@@ -176,26 +175,38 @@ class ChatClient:
             full_reply = ''.join(collected_chunks)
             final_reply_content = full_reply
 
-            bash_match = re.search(r'<bash>(.*?)</bash>', full_reply, re.DOTALL)
-            if bash_match:
-                script_to_run = bash_match.group(1).strip()
-                
-                print("\n----------------------------------------")
-                print(f"LLM wants to execute this command:\n\n{script_to_run}")
-                print("----------------------------------------")
-                
-                try:
-                    confirm = input("Do you want to execute this command? [y/N]: ").lower().strip()
-                except EOFError:
-                    confirm = 'n'
+            # Find all markdown bash command blocks in the response.
+            bash_matches = list(re.finditer(r'```bash\n(.*?)\n```', full_reply, re.DOTALL))
+            
+            if bash_matches:
+                print()
+                all_outputs_for_history = ""
+                num_commands = len(bash_matches)
 
-                if confirm == 'y':
-                    print("Executing...")
-                    output = run_bash_script(script_to_run)
-                    print(output)
-                    final_reply_content += f"\n\n--- SCRIPT OUTPUT ---\n{output}"
-                else:
-                    print("Execution skipped.")
+                for i, match in enumerate(bash_matches):
+                    script_to_run = match.group(1).strip()
+                    if not script_to_run:
+                        continue
+
+                    print("----------------------------------------")
+                    print(f"LLM wants to execute command {i+1} of {num_commands}:\n\n{script_to_run}")
+                    print("----------------------------------------")
+                    
+                    try:
+                        confirm = input("Do you want to execute this command? [y/N]: ").lower().strip()
+                    except EOFError:
+                        confirm = 'n'
+
+                    if confirm == 'y':
+                        print("Executing...")
+                        output = run_bash_script(script_to_run)
+                        print(output)
+                        all_outputs_for_history += f"\n\n--- SCRIPT {i+1} OUTPUT ---\n{output}"
+                    else:
+                        print("Execution skipped.")
+                
+                if all_outputs_for_history:
+                    final_reply_content += all_outputs_for_history
             
             self.summary = self.extract_summary(final_reply_content)
             self.messages.append({"role": "assistant", "content": final_reply_content})
