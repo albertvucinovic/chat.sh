@@ -282,20 +282,23 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
 
     try:
+        message_to_send=''
         while True:
             user_input = get_multiline_input(client).strip()
             
             if not user_input:
                 continue
 
-            message_to_send = user_input
-            if user_input.startswith("bash:"):
+            message_to_send += user_input
+            bash_command = "b "
+            if user_input.startswith(bash_command):
                 print("\nExecuting local command...")
-                script_to_run = user_input[len("bash:"):].strip()
+                script_to_run = user_input[len(bash_command):].strip()
                 if script_to_run:
                     output = run_bash_script(script_to_run)
                     print(output)
-                    message_to_send = f"{user_input}\n\n--- SCRIPT OUTPUT ---\n{output}"
+                    message_to_send += f"\n\n--- SCRIPT OUTPUT ---\n{output}"
+                    continue
                 else:
                     print("Empty bash command, skipping.")
                     continue
