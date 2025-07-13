@@ -11,6 +11,7 @@ import signal
 from pathlib import Path
 import requests
 from typing import List, Dict
+import subprocess
 
 
 def get_multiline_input(client: 'ChatClient') -> str:
@@ -80,6 +81,31 @@ def get_multiline_input(client: 'ChatClient') -> str:
     
     return '\n'.join(lines)
 
+def run_bash_script(script: str) -> str:
+    """Executes a bash script and captures its stdout and stderr."""
+    try:
+        result = subprocess.run(
+            script,
+            shell=True,
+            executable='/bin/bash',
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        output = ""
+        if result.stdout:
+            output += f"--- STDOUT ---\n{result.stdout.strip()}\n"
+        if result.stderr:
+            output += f"--- STDERR ---\n{result.stderr.strip()}\n"
+        
+        if not output.strip():
+            return "--- (No output) ---"
+        return output.strip()
+    except subprocess.TimeoutExpired:
+        return "--- STDERR ---\nError: Command timed out after 60 seconds."
+    except Exception as e:
+        return f"--- STDERR ---\nError executing command: {e}"
+
 class ChatClient:
     def __init__(self, base_url: str = "http://localhost:10000", token: str = None):
         self.base_url = base_url
@@ -94,7 +120,18 @@ class ChatClient:
         
         self.chat_dir = Path.cwd() / "localChats"
         self.chat_dir.mkdir(parents=True, exist_ok=True)
-        self.messages: List[Dict] = [{"role": "system", "content": "Always include a summary of the conversation within <summary> tags at the end of each of your responses. The summary should be maximum 10 words, and at least 3 words."}]
+        
+        # Load system prompt from file
+        try:
+            script_dir = Path(__file__).resolve().parent
+            system_prompt_path = script_dir / "systemPrompt"
+            with open(system_prompt_path, 'r', encoding='utf-8') as f:
+                system_prompt_content = f.read().strip()
+        except FileNotFoundError:
+            print("Warning: 'systemPrompt' file not found. Using default system prompt.", file=sys.stderr)
+            system_prompt_content = "Always include a summary of the conversation within <summary> tags at the end of each of your responses. The summary should be maximum 10 words, and at least 3 words."
+
+        self.messages: List[Dict] = [{"role": "system", "content": system_prompt_content}]
         self.summary = None
 
     def extract_summary(self, text):
@@ -119,35 +156,50 @@ class ChatClient:
                 },
                 stream=True
             )
-            
             response.raise_for_status()
             
             collected_chunks = []
-            
             for chunk in response.iter_lines():
                 if chunk:
                     chunk = chunk.decode('utf-8')
                     if chunk.startswith('data: '):
-                        chunk = chunk[6:]  # Remove 'data: ' prefix
+                        chunk = chunk[6:]
                         if chunk != '[DONE]':
                             chunk_data = json.loads(chunk)
                             choices = chunk_data.get('choices', [])
-                            if choices:
-                                delta = choices[0].get('delta', {})
-                                if 'content' in delta:
-                                    content = delta['content']
-                                    print(content, end='', flush=True)
-                                    collected_chunks.append(content)
+                            if choices and 'content' in choices[0].get('delta', {}):
+                                content = choices[0]['delta']['content']
+                                print(content, end='', flush=True)
+                                collected_chunks.append(content)
                                     
-            print()  # New line after response
+            print()
             full_reply = ''.join(collected_chunks)
-            
-            # Extract summary from the response
-            self.summary = self.extract_summary(full_reply)
-            main_reply = full_reply
+            final_reply_content = full_reply
+
+            bash_match = re.search(r'<bash>(.*?)</bash>', full_reply, re.DOTALL)
+            if bash_match:
+                script_to_run = bash_match.group(1).strip()
                 
-            self.messages.append({"role": "assistant", "content": main_reply})
-            return main_reply
+                print("\n----------------------------------------")
+                print(f"LLM wants to execute this command:\n\n{script_to_run}")
+                print("----------------------------------------")
+                
+                try:
+                    confirm = input("Do you want to execute this command? [y/N]: ").lower().strip()
+                except EOFError:
+                    confirm = 'n'
+
+                if confirm == 'y':
+                    print("Executing...")
+                    output = run_bash_script(script_to_run)
+                    print(output)
+                    final_reply_content += f"\n\n--- SCRIPT OUTPUT ---\n{output}"
+                else:
+                    print("Execution skipped.")
+            
+            self.summary = self.extract_summary(final_reply_content)
+            self.messages.append({"role": "assistant", "content": final_reply_content})
+            return final_reply_content
             
         except requests.exceptions.RequestException as e:
             print(f"Error: {e}")
@@ -195,11 +247,10 @@ def main():
                 client.messages = loaded_messages.copy()
             print(f"Loaded chat: {args.load}")
             
-            # Display the loaded conversation
             print("\nPrevious conversation:")
             for msg in client.messages:
                 if msg['role'] == 'system':
-                    continue  # Skip system messages
+                    continue
                 elif msg['role'] == 'user':
                     print(f"\nYou: {msg['content']}")
                 elif msg['role'] == 'assistant':
@@ -223,9 +274,23 @@ def main():
         while True:
             user_input = get_multiline_input(client).strip()
             
-            if user_input:
-                print("\nAssistant:", end=' ')
-                client.send_message(user_input)
+            if not user_input:
+                continue
+
+            message_to_send = user_input
+            if user_input.startswith("bash:"):
+                print("\nExecuting local command...")
+                script_to_run = user_input[len("bash:"):].strip()
+                if script_to_run:
+                    output = run_bash_script(script_to_run)
+                    print(output)
+                    message_to_send = f"{user_input}\n\n--- SCRIPT OUTPUT ---\n{output}"
+                else:
+                    print("Empty bash command, skipping.")
+                    continue
+            
+            print("\nAssistant:", end=' ')
+            client.send_message(message_to_send)
                 
     except EOFError:
         print("\nSaving chat and exiting...")
@@ -234,4 +299,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
