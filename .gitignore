@@ -2,3 +2,5 @@
 .env
 *.un~
 *.swp
+venv
+localChats
