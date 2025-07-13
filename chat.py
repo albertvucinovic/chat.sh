@@ -216,6 +216,32 @@ class ChatClient:
             print(f"Error: {e}")
             return ""
 
+    def send_context_only(self, message: str):
+        """Sends a message to prime the LLM's context without streaming a reply."""
+        self.messages.append({"role": "user", "content": message})
+        print("\nSending context to LLM...", flush=True)
+        
+        try:
+            response = requests.post(
+                f"{self.base_url}/v1/chat/completions",
+                headers=self.headers,
+                json={
+                    "model": os.environ.get('LOCAL_OPENAI_API_MODEL'),
+                    "messages": self.messages,
+                    "stream": False,
+                    "max_tokens": 1 # We don't need a response, so ask for the minimum.
+                },
+                timeout=20 # Give it a reasonable timeout to process.
+            )
+            response.raise_for_status()
+            # We intentionally ignore the response content and do not add an assistant message.
+            print("Done.")
+            
+        except requests.exceptions.RequestException as e:
+            print(f"\nError: Failed to send context to LLM: {e}", file=sys.stderr)
+            # If the request fails, remove the message we added to keep history consistent.
+            self.messages.pop()
+
     def save_chat(self) -> str:
         summary = self.summary if self.summary else "unnamed_chat"
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -282,14 +308,12 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
 
     try:
-        message_to_send=''
         while True:
             user_input = get_multiline_input(client).strip()
             
             if not user_input:
                 continue
 
-            message_to_send += user_input
             bash_command = "b "
             if user_input.startswith(bash_command):
                 print("\nExecuting local command...")
@@ -297,14 +321,20 @@ def main():
                 if script_to_run:
                     output = run_bash_script(script_to_run)
                     print(output)
-                    message_to_send += f"\n\n--- SCRIPT OUTPUT ---\n{output}"
+                    # This message informs the LLM that a command was run.
+                    context_message = (
+                        f"User executed a local command.\n"
+                        f"Command:\n```bash\n{script_to_run}\n```\n\n"
+                        f"Output:\n---\n{output}\n---"
+                    )
+                    client.send_context_only(context_message)
                     continue
                 else:
                     print("Empty bash command, skipping.")
                     continue
             
             print("\n[Assistant]:", end=' ')
-            client.send_message(message_to_send)
+            client.send_message(user_input)
                 
     except EOFError:
         print("\nSaving chat and exiting...")
