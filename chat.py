@@ -13,7 +13,7 @@ from typing import List, Dict, Set, Optional
 import subprocess
 import termios
 import tty
-
+from io import StringIO
 
 class Completer:
     """
@@ -45,7 +45,7 @@ class Completer:
     def find_suggestions(self, line: List[str]):
         """
         Generate suggestions based on the word before the cursor.
-        The "word" is defined as everything after the last whitespace.
+        The "word" is defined as everything after the last whitespace or delimiter.
         """
         current_text = "".join(line)
         delimiters = ' \t\n`~!@#$%^&*()=+[{]}\\|;:\'",<>/?'
@@ -112,8 +112,8 @@ def get_multiline_input(client: 'ChatClient') -> str:
     SAVE_CURSOR = "\x1b[s"
     RESTORE_CURSOR = "\x1b[u"
     MOVE_DOWN_1 = "\x1b[B"
-    CLEAR_LINE = "\x1b[K"
     MOVE_UP_1 = "\x1b[A"
+    CLEAR_LINE = "\x1b[K"
     CLEAR_ENTIRE_LINE = "\x1b[2K"
 
     def _draw_suggestions():
@@ -176,27 +176,17 @@ def get_multiline_input(client: 'ChatClient') -> str:
                 print(f"Chat saved to: {saved_path}")
                 sys.exit(0)
 
-            # --- THIS BLOCK IS THE FIX ---
             elif ord(char) == 5: # Ctrl+E to clear all input
                 _clear_suggestions()
-
-                # Move to the beginning of the current line and clear it
                 sys.stdout.write('\r' + CLEAR_ENTIRE_LINE)
-
-                # Move up and clear any previously submitted lines
                 for _ in range(len(lines)):
                     sys.stdout.write(MOVE_UP_1)
                     sys.stdout.write(CLEAR_ENTIRE_LINE)
-
-                # Reset the internal state
                 lines.clear()
                 current_line.clear()
-
-                # Reprint the prompt
                 sys.stdout.write("[You]: ")
                 sys.stdout.flush()
                 continue
-            # --- END OF FIX ---
 
             elif char == '\t': # Tab key
                 if not completer.active:
@@ -206,11 +196,8 @@ def get_multiline_input(client: 'ChatClient') -> str:
                 if suggestion:
                     line_str = "".join(current_line)
                     sys.stdout.write('\r' + ' ' * (len("[You]: ") + len(line_str)) + '\r')
-                    
                     current_line = completer.apply_suggestion(current_line, suggestion)
-                    
                     sys.stdout.write("[You]: " + ''.join(current_line))
-                    
                     completer.find_suggestions(current_line)
                     _draw_suggestions()
                 sys.stdout.flush()
@@ -266,6 +253,36 @@ def run_bash_script(script: str) -> str:
     except Exception as e:
         return f"--- STDERR ---\nError executing command: {e}"
 
+def run_python_script(script: str) -> str:
+    """Executes a Python script string and captures its output."""
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    redirected_stdout = sys.stdout = StringIO()
+    redirected_stderr = sys.stderr = StringIO()
+    
+    try:
+        exec(script, globals())
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+        
+        output = ""
+        stdout_val = redirected_stdout.getvalue().strip()
+        stderr_val = redirected_stderr.getvalue().strip()
+
+        if stdout_val:
+            output += f"--- STDOUT ---\n{stdout_val}\n"
+        if stderr_val:
+            output += f"--- STDERR ---\n{stderr_val}\n"
+            
+        if not output.strip():
+            return "--- (No output) ---"
+        return output.strip()
+
+    except Exception as e:
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+        return f"--- STDERR ---\nError executing Python script: {e}"
+
 class ChatClient:
     def __init__(self, base_url: str = "http://localhost:10000", token: str = None):
         self.base_url = base_url
@@ -288,7 +305,7 @@ class ChatClient:
                 system_prompt_content = f.read()
         except FileNotFoundError:
             print("Warning: 'systemPrompt' file not found. Using default system prompt.", file=sys.stderr)
-            system_prompt_content = "Always include a summary of the conversation within <summary> tags at the end of each of your responses. The summary should be maximum 10 words, and at least 3 words."
+            system_prompt_content = "You are a helpful assistant."
 
         self.messages: List[Dict] = [{"role": "system", "content": system_prompt_content}]
         self.summary = None
@@ -342,32 +359,45 @@ class ChatClient:
             full_reply = ''.join(collected_chunks)
             final_reply_content = full_reply
 
-            bash_matches = list(re.finditer(r'```bash\n(.*?)\n```', full_reply, re.DOTALL))
+            tool_matches = []
+            bash_regex = r'```bash\n(.*?)\n```'
+            python_regex = r'```python\n(.*?)\n```'
             
-            if bash_matches:
+            for match in re.finditer(bash_regex, full_reply, re.DOTALL):
+                tool_matches.append(('bash', match.group(1).strip()))
+            
+            for match in re.finditer(python_regex, full_reply, re.DOTALL):
+                tool_matches.append(('python', match.group(1).strip()))
+
+            if tool_matches:
                 print()
                 all_outputs_for_history = ""
-                num_commands = len(bash_matches)
+                num_commands = len(tool_matches)
 
-                for i, match in enumerate(bash_matches):
-                    script_to_run = match.group(1).strip()
+                for i, (tool_type, script_to_run) in enumerate(tool_matches):
                     if not script_to_run:
                         continue
 
                     print("----------------------------------------")
-                    print(f"LLM wants to execute command {i+1} of {num_commands}:\n\n{script_to_run}")
+                    print(f"LLM wants to execute the following {tool_type} script ({i+1} of {num_commands}):\n")
+                    print(script_to_run)
                     print("----------------------------------------")
                     
                     try:
-                        confirm = input("Do you want to execute this command? [y/N]: ").lower().strip()
+                        confirm = input("Do you want to execute this script? [y/N]: ").lower().strip()
                     except EOFError:
                         confirm = 'n'
 
                     if confirm == 'y':
                         print("Executing...")
-                        output = run_bash_script(script_to_run)
+                        output = ""
+                        if tool_type == 'bash':
+                            output = run_bash_script(script_to_run)
+                        elif tool_type == 'python':
+                            output = run_python_script(script_to_run)
+                        
                         print(output)
-                        all_outputs_for_history += f"\n\n--- SCRIPT {i+1} OUTPUT ---\n{output}"
+                        all_outputs_for_history += f"\n\n--- SCRIPT {i+1} ({tool_type}) OUTPUT ---\n{output}"
                     else:
                         print("Execution skipped.")
                 
@@ -383,11 +413,10 @@ class ChatClient:
             return ""
 
     def send_context_only(self, message: str):
-        """Sends a message to prime the LLM's context without streaming a reply."""
         self.messages.append({"role": "user", "content": message})
         
         try:
-            response = requests.post(
+            requests.post(
                 f"{self.base_url}/v1/chat/completions",
                 headers=self.headers,
                 json={
@@ -396,9 +425,8 @@ class ChatClient:
                     "stream": False,
                     "max_tokens": 1
                 },
-                timeout=120
-            )
-            response.raise_for_status()
+                timeout=20
+            ).raise_for_status()
         except requests.exceptions.RequestException as e:
             print(f"\nError: Failed to send context to LLM: {e}", file=sys.stderr)
             self.messages.pop()
@@ -443,8 +471,7 @@ def main():
         chat_file = client.chat_dir / args.load
         if chat_file.exists():
             with open(chat_file, 'r') as f:
-                loaded_messages = json.load(f)
-                client.messages = loaded_messages.copy()
+                client.messages = json.load(f)
             print(f"Loaded chat: {args.load}")
             
             print("\n--- Previous conversation ---")
