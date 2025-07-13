@@ -37,7 +37,9 @@ EOF
 Or similarly, at your discretion use a python tool call.
 Use this if you don't think there will be problems with bash escaping.
 
-If a user gives you a message of only "commit", then do:
+If a user gives asks you to do a commit (also a request if he only says "commit")
 1) git status
 2) git diff
-2) view the changes and decide on a commit message create a bash call that executes the commit
+3) view the changes and decide on a commit message create a bash call that executes the commit
+4) add only the already tracked files, but if you see some filename mentioned in the code, you should also suggest to add it
+5) also, follow other instructions in the ask
