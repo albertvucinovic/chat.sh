@@ -414,7 +414,7 @@ class ChatClient:
                     "stream": False,
                     "max_tokens": 1
                 },
-                timeout=20
+                timeout=120
             ).raise_for_status()
         except requests.exceptions.RequestException as e:
             print(f"\nError: Failed to send context to LLM: {e}", file=sys.stderr)
