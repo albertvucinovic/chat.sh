@@ -125,7 +125,7 @@ class ChatClient:
             script_dir = Path(__file__).resolve().parent
             system_prompt_path = script_dir / "systemPrompt"
             with open(system_prompt_path, 'r', encoding='utf-8') as f:
-                system_prompt_content = f.read().strip()
+                system_prompt_content = f.read()
         except FileNotFoundError:
             print("Warning: 'systemPrompt' file not found. Using default system prompt.", file=sys.stderr)
             system_prompt_content = "Always include a summary of the conversation within <summary> tags at the end of each of your responses. The summary should be maximum 10 words, and at least 3 words."
