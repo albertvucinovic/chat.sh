@@ -22,7 +22,7 @@ class Completer:
     def __init__(self, client: 'ChatClient'):
         self.client = client
         self.suggestions: List[str] = []
-        self.current_index = 0
+        self.current_index = -1
         self.active = False
 
     def _get_words_from_history(self) -> Set[str]:
@@ -71,7 +71,7 @@ class Completer:
         
         if self.suggestions:
             self.active = True
-            self.current_index = 0
+            self.current_index = -1
         else:
             self.reset()
 
@@ -79,9 +79,15 @@ class Completer:
         """Cycles to the next suggestion."""
         if not self.suggestions:
             return None
-        suggestion = self.suggestions[self.current_index]
         self.current_index = (self.current_index + 1) % len(self.suggestions)
-        return suggestion
+        return self.suggestions[self.current_index]
+
+    def previous_suggestion(self) -> Optional[str]:
+        """Cycles to the previous suggestion."""
+        if not self.suggestions:
+            return None
+        self.current_index = (self.current_index - 1 + len(self.suggestions)) % len(self.suggestions)
+        return self.suggestions[self.current_index]
 
     def apply_suggestion(self, current_line: List[str], suggestion: str) -> List[str]:
         """Replaces the current word with the chosen suggestion."""
@@ -103,45 +109,19 @@ class Completer:
     def reset(self):
         """Resets the completer state."""
         self.suggestions = []
-        self.current_index = 0
+        self.current_index = -1
         self.active = False
 
 def get_multiline_input(client: 'ChatClient') -> str:
     completer = Completer(client)
     
-    SAVE_CURSOR = "\x1b[s"
-    RESTORE_CURSOR = "\x1b[u"
-    MOVE_DOWN_1 = "\x1b[B"
-    MOVE_UP_1 = "\x1b[A"
-    CLEAR_LINE = "\x1b[K"
     CLEAR_ENTIRE_LINE = "\x1b[2K"
-
-    def _draw_suggestions():
-        if not completer.active:
-            return
-        sys.stdout.write(SAVE_CURSOR)
-        sys.stdout.write(MOVE_DOWN_1)
-        display_suggestions = []
-        for i, s in enumerate(completer.suggestions[:5]):
-            if i == completer.current_index % 5:
-                display_suggestions.append(f"\x1b[7m {s} \x1b[0m")
-            else:
-                display_suggestions.append(s)
-        
-        suggestion_line = "Suggestions: " + " | ".join(display_suggestions)
-        sys.stdout.write('\r' + CLEAR_LINE + suggestion_line)
-        sys.stdout.write(RESTORE_CURSOR)
-        sys.stdout.flush()
+    MOVE_UP_1 = "\x1b[A"
 
     def _clear_suggestions():
-        if not completer.active:
-            return
-        sys.stdout.write(SAVE_CURSOR)
-        sys.stdout.write(MOVE_DOWN_1)
-        sys.stdout.write('\r' + CLEAR_LINE)
-        sys.stdout.write(RESTORE_CURSOR)
-        sys.stdout.flush()
-        completer.reset()
+        """Resets completer state."""
+        if completer.active:
+            completer.reset()
 
     print("\n[You]: ", end='', flush=True)
     lines = []
@@ -156,14 +136,12 @@ def get_multiline_input(client: 'ChatClient') -> str:
             char = sys.stdin.read(1)
             
             if not char or ord(char) == 4: # Ctrl+D
-                _clear_suggestions()
                 if current_line:
                     lines.append(''.join(current_line))
                 print()
                 break
                 
             elif ord(char) == 3: # Ctrl+C
-                _clear_suggestions()
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
                 print("\nSaving chat and exiting...")
                 if current_line or lines:
@@ -188,18 +166,29 @@ def get_multiline_input(client: 'ChatClient') -> str:
                 sys.stdout.flush()
                 continue
 
-            elif char == '\t': # Tab key
+            elif char == '\t' or char == '\x1b': # Tab or Escape sequence
+                if char == '\x1b':
+                    # Check for Shift+Tab: ESC [ Z
+                    next_chars = sys.stdin.read(2)
+                    if next_chars != '[Z':
+                        continue # Ignore other escape sequences
+                    is_forward = False
+                else:
+                    is_forward = True
+
                 if not completer.active:
                     completer.find_suggestions(current_line)
                 
-                suggestion = completer.next_suggestion()
+                if is_forward:
+                    suggestion = completer.next_suggestion()
+                else:
+                    suggestion = completer.previous_suggestion()
+
                 if suggestion:
-                    line_str = "".join(current_line)
-                    sys.stdout.write('\r' + ' ' * (len("[You]: ") + len(line_str)) + '\r')
                     current_line = completer.apply_suggestion(current_line, suggestion)
+                    sys.stdout.write('\r' + CLEAR_ENTIRE_LINE)
                     sys.stdout.write("[You]: " + ''.join(current_line))
-                    completer.find_suggestions(current_line)
-                    _draw_suggestions()
+                
                 sys.stdout.flush()
                 continue
 
