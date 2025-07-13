@@ -5,18 +5,143 @@ import sys
 import json
 import argparse
 import datetime
-import readline
 import re
 import signal
 from pathlib import Path
 import requests
-from typing import List, Dict
+from typing import List, Dict, Set, Optional
 import subprocess
+import termios
+import tty
 
+
+class Completer:
+    """
+    Manages completion state and suggestion generation from history and the filesystem.
+    """
+    def __init__(self, client: 'ChatClient'):
+        self.client = client
+        self.suggestions: List[str] = []
+        self.current_index = 0
+        self.active = False
+
+    def _get_words_from_history(self) -> Set[str]:
+        """Extracts all unique words from the message history."""
+        words = set()
+        word_regex = re.compile(r'[\w.-]+')
+        for message in self.client.messages:
+            content = message.get("content", "")
+            found_words = word_regex.findall(content.lower())
+            words.update(found_words)
+        return words
+
+    def _get_words_from_filesystem(self) -> Set[str]:
+        """Gets all file and directory names from the current directory."""
+        try:
+            return set(os.listdir('.'))
+        except OSError:
+            return set()
+
+    def find_suggestions(self, line: List[str]):
+        """
+        Generate suggestions based on the word before the cursor.
+        The "word" is defined as everything after the last whitespace.
+        """
+        current_text = "".join(line)
+        delimiters = ' \t\n`~!@#$%^&*()=+[{]}\\|;:\'",<>/?'
+        word_start_index = 0
+        for i in range(len(current_text) - 1, -1, -1):
+            if current_text[i] in delimiters:
+                word_start_index = i + 1
+                break
+        
+        prefix = current_text[word_start_index:]
+        
+        if not prefix:
+            self.reset()
+            return
+
+        history_words = self._get_words_from_history()
+        fs_words = self._get_words_from_filesystem()
+        all_words = history_words.union(fs_words)
+
+        self.suggestions = sorted([
+            word for word in all_words if word.lower().startswith(prefix.lower()) and word.lower() != prefix.lower()
+        ])
+        
+        if self.suggestions:
+            self.active = True
+            self.current_index = 0
+        else:
+            self.reset()
+
+    def next_suggestion(self) -> Optional[str]:
+        """Cycles to the next suggestion."""
+        if not self.suggestions:
+            return None
+        suggestion = self.suggestions[self.current_index]
+        self.current_index = (self.current_index + 1) % len(self.suggestions)
+        return suggestion
+
+    def apply_suggestion(self, current_line: List[str], suggestion: str) -> List[str]:
+        """Replaces the current word with the chosen suggestion."""
+        current_text = "".join(current_line)
+        delimiters = ' \t\n`~!@#$%^&*()=+[{]}\\|;:\'",<>/?'
+        word_start_index = 0
+        for i in range(len(current_text) - 1, -1, -1):
+            if current_text[i] in delimiters:
+                word_start_index = i + 1
+                break
+        
+        if os.path.isdir(suggestion):
+            suggestion += '/'
+
+        new_line = list(current_text[:word_start_index])
+        new_line.extend(list(suggestion))
+        return new_line
+
+    def reset(self):
+        """Resets the completer state."""
+        self.suggestions = []
+        self.current_index = 0
+        self.active = False
 
 def get_multiline_input(client: 'ChatClient') -> str:
-    import termios
-    import sys, tty
+    completer = Completer(client)
+    
+    SAVE_CURSOR = "\x1b[s"
+    RESTORE_CURSOR = "\x1b[u"
+    MOVE_DOWN_1 = "\x1b[B"
+    CLEAR_LINE = "\x1b[K"
+    MOVE_UP_1 = "\x1b[A"
+    CLEAR_ENTIRE_LINE = "\x1b[2K"
+
+    def _draw_suggestions():
+        if not completer.active:
+            return
+        sys.stdout.write(SAVE_CURSOR)
+        sys.stdout.write(MOVE_DOWN_1)
+        display_suggestions = []
+        for i, s in enumerate(completer.suggestions[:5]):
+            if i == completer.current_index % 5:
+                display_suggestions.append(f"\x1b[7m {s} \x1b[0m")
+            else:
+                display_suggestions.append(s)
+        
+        suggestion_line = "Suggestions: " + " | ".join(display_suggestions)
+        sys.stdout.write('\r' + CLEAR_LINE + suggestion_line)
+        sys.stdout.write(RESTORE_CURSOR)
+        sys.stdout.flush()
+
+    def _clear_suggestions():
+        if not completer.active:
+            return
+        sys.stdout.write(SAVE_CURSOR)
+        sys.stdout.write(MOVE_DOWN_1)
+        sys.stdout.write('\r' + CLEAR_LINE)
+        sys.stdout.write(RESTORE_CURSOR)
+        sys.stdout.flush()
+        completer.reset()
 
     print("\n[You]: ", end='', flush=True)
     lines = []
@@ -30,13 +155,15 @@ def get_multiline_input(client: 'ChatClient') -> str:
         while True:
             char = sys.stdin.read(1)
             
-            if not char or ord(char) == 4:
+            if not char or ord(char) == 4: # Ctrl+D
+                _clear_suggestions()
                 if current_line:
                     lines.append(''.join(current_line))
                 print()
                 break
                 
-            elif ord(char) == 3:
+            elif ord(char) == 3: # Ctrl+C
+                _clear_suggestions()
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
                 print("\nSaving chat and exiting...")
                 if current_line or lines:
@@ -49,32 +176,65 @@ def get_multiline_input(client: 'ChatClient') -> str:
                 print(f"Chat saved to: {saved_path}")
                 sys.exit(0)
 
-            elif ord(char) == 5:  # Ctrl+E (ASCII code 5)
-                current_line = []
-                lines.clear()  # Clear all accumulated lines for this message
-                # Clear terminal display and reset prompt
-                sys.stdout.write('\r\x1b[2KYou: ')
-                sys.stdout.flush()
+            # --- THIS BLOCK IS THE FIX ---
+            elif ord(char) == 5: # Ctrl+E to clear all input
+                _clear_suggestions()
 
-            elif ord(char) == 24: # Ctrl+X
-                sys.exit(0)
+                # Move to the beginning of the current line and clear it
+                sys.stdout.write('\r' + CLEAR_ENTIRE_LINE)
+
+                # Move up and clear any previously submitted lines
+                for _ in range(len(lines)):
+                    sys.stdout.write(MOVE_UP_1)
+                    sys.stdout.write(CLEAR_ENTIRE_LINE)
+
+                # Reset the internal state
+                lines.clear()
+                current_line.clear()
+
+                # Reprint the prompt
+                sys.stdout.write("[You]: ")
+                sys.stdout.flush()
+                continue
+            # --- END OF FIX ---
+
+            elif char == '\t': # Tab key
+                if not completer.active:
+                    completer.find_suggestions(current_line)
                 
-            elif char == '\r' or char == '\n':
+                suggestion = completer.next_suggestion()
+                if suggestion:
+                    line_str = "".join(current_line)
+                    sys.stdout.write('\r' + ' ' * (len("[You]: ") + len(line_str)) + '\r')
+                    
+                    current_line = completer.apply_suggestion(current_line, suggestion)
+                    
+                    sys.stdout.write("[You]: " + ''.join(current_line))
+                    
+                    completer.find_suggestions(current_line)
+                    _draw_suggestions()
+                sys.stdout.flush()
+                continue
+
+            _clear_suggestions()
+
+            if char == '\r' or char == '\n':
                 lines.append(''.join(current_line))
                 current_line = []
                 sys.stdout.write('\r\n')
                 sys.stdout.flush()
                 
-            elif ord(char) == 127:
+            elif ord(char) == 127: # Backspace
                 if current_line:
                     current_line.pop()
                     sys.stdout.write('\b \b')
                     sys.stdout.flush()
                     
             else:
-                current_line.append(char)
-                sys.stdout.write(char)
-                sys.stdout.flush()
+                if char.isprintable():
+                    current_line.append(char)
+                    sys.stdout.write(char)
+                    sys.stdout.flush()
                 
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
@@ -134,13 +294,20 @@ class ChatClient:
         self.summary = None
 
     def extract_summary(self, text):
-        start = text.rfind('<summary>') + len('<summary>')
-        end = text.find('</summary>', start)
-        if start == -1 or end == -1:
+        start_tag = '<summary>'
+        end_tag = '</summary>'
+        start_index = text.rfind(start_tag)
+        if start_index == -1:
             return None
-        return text[start:end].strip()
- 
         
+        start_index += len(start_tag)
+        end_index = text.find(end_tag, start_index)
+        
+        if end_index == -1:
+            return None
+            
+        return text[start_index:end_index].strip()
+ 
     def send_message(self, message: str) -> str:
         self.messages.append({"role": "user", "content": message})
         
@@ -175,7 +342,6 @@ class ChatClient:
             full_reply = ''.join(collected_chunks)
             final_reply_content = full_reply
 
-            # Find all markdown bash command blocks in the response.
             bash_matches = list(re.finditer(r'```bash\n(.*?)\n```', full_reply, re.DOTALL))
             
             if bash_matches:
@@ -228,21 +394,20 @@ class ChatClient:
                     "model": os.environ.get('LOCAL_OPENAI_API_MODEL'),
                     "messages": self.messages,
                     "stream": False,
-                    "max_tokens": 1 # We don't need a response, so ask for the minimum.
+                    "max_tokens": 1
                 },
-                timeout=20 # Give it a reasonable timeout to process.
+                timeout=120
             )
             response.raise_for_status()
-            # We intentionally ignore the response content and do not add an assistant message.
         except requests.exceptions.RequestException as e:
             print(f"\nError: Failed to send context to LLM: {e}", file=sys.stderr)
-            # If the request fails, remove the message we added to keep history consistent.
             self.messages.pop()
 
     def save_chat(self) -> str:
         summary = self.summary if self.summary else "unnamed_chat"
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        chat_name = f"{timestamp}_{summary.replace(' ', '_')}.json"
+        safe_summary = re.sub(r'[^\w\-]', '_', summary)
+        chat_name = f"{timestamp}_{safe_summary}.json"
         
         file_path = self.chat_dir / chat_name
         with open(file_path, 'w') as f:
@@ -265,7 +430,7 @@ def main():
         return
 
     if args.list:
-        chats = [chat.name for chat in client.chat_dir.iterdir() if chat.is_file()]
+        chats = sorted([chat.name for chat in client.chat_dir.iterdir() if chat.is_file()])
         if chats:
             print("Available chats:")
             for chat in chats:
@@ -273,6 +438,7 @@ def main():
         else:
             print("No saved chats found.")
         return
+        
     if args.load:
         chat_file = client.chat_dir / args.load
         if chat_file.exists():
@@ -281,26 +447,36 @@ def main():
                 client.messages = loaded_messages.copy()
             print(f"Loaded chat: {args.load}")
             
-            print("\nPrevious conversation:")
+            print("\n--- Previous conversation ---")
             for msg in client.messages:
                 if msg['role'] == 'system':
                     continue
                 elif msg['role'] == 'user':
-                    print(f"\nYou: {msg['content']}")
+                    print(f"\n[You]:\n{msg['content']}")
                 elif msg['role'] == 'assistant':
-                    print(f"  [Assistant]: {msg['content']}\n")
+                    summary = client.extract_summary(msg['content'])
+                    content_to_print = msg['content']
+                    if summary:
+                        content_to_print = content_to_print.replace(f"<summary>{summary}</summary>", "").strip()
+                    print(f"\n[Assistant]:\n{content_to_print}")
+            print("\n--- End of previous conversation ---\n")
         else:
             print(f"Chat file not found: {args.load}")
             return
 
-
-    print("Chat started. Press Ctrl+D to submit message, Ctrl+C to exit and save, Ctrl+X to exit without saving.")
+    print("Chat started. Press Tab to autocomplete. Press Ctrl+D to submit. Press Ctrl+C to exit and save. Press Ctrl+E to clear input.")
     
     def signal_handler(sig, frame):
-        print("\nSaving chat and exiting...")
+        print("\n\nSaving chat and exiting...")
+        fd = sys.stdin.fileno()
+        try:
+            original_settings = termios.tcgetattr(fd)
+            termios.tcsetattr(fd, termios.TCSADRAIN, original_settings)
+        except:
+            pass
         saved_path = client.save_chat()
         print(f"Chat saved to: {saved_path}")
-        exit(0)
+        sys.exit(0)
     
     signal.signal(signal.SIGINT, signal_handler)
 
@@ -318,7 +494,6 @@ def main():
                 if script_to_run:
                     output = run_bash_script(script_to_run)
                     print(output)
-                    # This message informs the LLM that a command was run.
                     context_message = (
                         f"User executed a local command.\n"
                         f"Command:\n```bash\n{script_to_run}\n```\n\n"
