@@ -18,7 +18,7 @@ def get_multiline_input(client: 'ChatClient') -> str:
     import termios
     import sys, tty
 
-    print("\nYou: ", end='', flush=True)
+    print("\n[You]: ", end='', flush=True)
     lines = []
     current_line = []
     
@@ -265,7 +265,7 @@ def main():
                 elif msg['role'] == 'user':
                     print(f"\nYou: {msg['content']}")
                 elif msg['role'] == 'assistant':
-                    print(f"  Assistant: {msg['content']}\n")
+                    print(f"  [Assistant]: {msg['content']}\n")
         else:
             print(f"Chat file not found: {args.load}")
             return
@@ -303,7 +303,7 @@ def main():
                     print("Empty bash command, skipping.")
                     continue
             
-            print("\nAssistant:", end=' ')
+            print("\n[Assistant]:", end=' ')
             client.send_message(message_to_send)
                 
     except EOFError:
