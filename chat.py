@@ -219,7 +219,6 @@ class ChatClient:
     def send_context_only(self, message: str):
         """Sends a message to prime the LLM's context without streaming a reply."""
         self.messages.append({"role": "user", "content": message})
-        print("\nSending context to LLM...", flush=True)
         
         try:
             response = requests.post(
@@ -235,8 +234,6 @@ class ChatClient:
             )
             response.raise_for_status()
             # We intentionally ignore the response content and do not add an assistant message.
-            print("Done.")
-            
         except requests.exceptions.RequestException as e:
             print(f"\nError: Failed to send context to LLM: {e}", file=sys.stderr)
             # If the request fails, remove the message we added to keep history consistent.
