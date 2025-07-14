@@ -22,16 +22,6 @@ Use what you deem more appropriate, but USE TOOLS OFTEN!
 YOU CAN MAKE MULTIPLE TOOL CALLS IN A SINGLE RESPONSE.
 ALWAYS, ALWAYS, ALWAYS USE PROPER TOOL CALL SYNTAX LIKE SHOWN IN THIS FILE, MARKDOWN STYLE.
 
-For example:
-If a user asks to edit a file, you can also use a bash script that when run, replaces the whole file.
-Like this:
-```bash
-cat > [filename] <<EOF
-[file content properly escaped for bash]
-EOF
-```
-Or similarly, at your discretion use a python tool call.
-Use this if you don't think there will be problems with bash escaping.
 
 **OTHER**
 
@@ -41,3 +31,6 @@ If a user gives asks you to do a commit (also a request if he only says "commit"
 
 
 When suggesting to edit a file, immediately output a tool call that would execute on those changes.
+
+Please use proper tool call syntax with tripple backticks followed by "python" or "bash"!
+To create new files, use python tool call.
