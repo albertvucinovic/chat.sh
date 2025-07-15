@@ -199,7 +199,7 @@ class ChatClient:
 
                     chunk = json.loads(data)
                     # --- TEMPORARY DEBUGGING ---
-                    #print(f"\nGEMINI_CHUNK>>> {chunk}")
+                    #print(f"\nCHUNK>>> {chunk}")
                     # --- END DEBUGGING ---
                     
                     # Add a guard clause to prevent IndexError
@@ -220,12 +220,13 @@ class ChatClient:
                     tool_calls_chunk = delta.get("tool_calls")
                     if tool_calls_chunk:
                         for index, tc_delta in enumerate(tool_calls_chunk):
+                            # Use the index from the delta if present (OpenAI-style), otherwise use the enumerated index (Gemini-style).
                             buffer_index = tc_delta.get("index", index)
 
+                            # Initialize the buffer for this tool call if it's new.
                             if buffer_index not in tool_calls_buf:
                                 tool_calls_buf[buffer_index] = {
-                                    # Generate a fallback ID immediately in case one isn't provided.
-                                    "id": f"call_{uuid.uuid4().hex[:10]}",
+                                    "id": f"call_{uuid.uuid4().hex[:10]}", # Generate a fallback ID
                                     "type": "function",
                                     "function": {"name": "", "arguments": ""},
                                 }
@@ -246,20 +247,33 @@ class ChatClient:
                             if newly_received_args:
                                 tc_full["function"]["arguments"] += newly_received_args
 
-                            # --- Smart Printing Logic ---
+                            # --- Smart Printing Logic for BOTH Stream Types ---
                             name_just_appeared = tc_full["function"]["name"] and not name_was_known
+
+                            # 1. Print the header ONLY if the name was just discovered.
                             if name_just_appeared:
                                 _raw_print(f"\n\n[Tool Call: {tc_full['function']['name']}]\n")
                                 printed_tool_headers.add(buffer_index)
 
+                            # 2. Print the content of the arguments.
                             if newly_received_args:
-                                if name_just_appeared and tc_full['function']['arguments'] == newly_received_args:
+                                # Check if this is an "all-in-one" chunk (Gemini-style).
+                                is_all_in_one_chunk = name_just_appeared and tc_full['function']['arguments'] == newly_received_args
+
+                                if is_all_in_one_chunk:
+                                    # Format the complete script block nicely.
                                     try:
-                                        script = json.loads(newly_received_args).get('script', '')
-                                        _raw_print("```" + tc_full['function']['name'] + "\n" + script + "\n```")
+                                        # The arguments are a JSON string, so we load it into a dict
+                                        args_dict = json.loads(newly_received_args)
+                                        script_content = args_dict.get('script', '')
+                                        _raw_print("```" + tc_full['function']['name'] + "\n")
+                                        _raw_print(script_content)
+                                        _raw_print("\n```")
                                     except Exception:
+                                        # Fallback for safety if parsing fails
                                         _raw_print(newly_received_args)
                                 else:
+                                    # Otherwise, it's a fragmented stream (OpenAI-style), so just print the piece we got.
                                     _raw_print(newly_received_args)
                 _raw_print("\n")
 
