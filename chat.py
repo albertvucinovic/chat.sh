@@ -338,7 +338,7 @@ def run_python_script(script: str) -> str:
 # ============================== Chat client ============================ #
 class ChatClient:
     def __init__(self, base_url: str = "http://localhost:10000", token: str | None = None):
-        self.base_url = base_url
+        self.base_url = os.getenv("OPENAI_API_BASE", base_url)
         self.token = token or os.environ.get("LOCAL_OPENAI_API_KEY")
         if not self.token:
             raise ValueError(
