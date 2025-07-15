@@ -61,6 +61,7 @@ The client supports features like tool calling, streaming responses, and local c
    export API_BASE=http://localhost:10000/v1/chat/completions
    export API_KEY=<your local api key>
    export API_MODEL='../vllm/Models/mistralai/Devstral-Small-2507-Q8_0.gguf'
+   ```
 
    - TogetherAI:
    ```bash
@@ -69,13 +70,27 @@ The client supports features like tool calling, streaming responses, and local c
    export API_MODEL=moonshotai/Kimi-K2-Instruct
    ```
 
-   - Gemini OpenAI compatible api:
+   - Gemini:
    ```bash
    #Gemini
    export API_KEY=<your gemini api key from google ai studio>
    export API_MODEL=gemini-2.5-flash
    export API_BASE=https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
+   ```
 
+   - OpenAI:
+   ```bash
+   export API_BASE=https://api.openai.com/v1/chat/completions
+   export API_KEY=<your openai api key>
+   export API_MODEL=o3-mini
+   ```
+
+   - Anthropic:
+   ```bash
+   #I guess
+   export API_BASE=https://api.anthropic.com/v1/chat/completions
+   export API_MODEL=claude-opus-4-20250514
+   export API_KEY=<your anthropic key>
    ```
 
 5. **Run the chat client**:
@@ -126,11 +141,4 @@ This project is open source and available under the [MIT License](https://openso
 
 ## Contributing
 
-Feel free to submit issues or pull requests. For major changes, please open an issue first to discuss what you would like to change.
-
-## Acknowledgments
-
-- OpenAI for the tool-calling protocol inspiration
-- All model developers whose work is referenced in the configuration
-
-Happy chatting!
+Feel free to submit issues or pull requests. 

@@ -70,6 +70,7 @@ class ChatClient:
                 file=sys.stderr,
             )
             system_prompt_content = "You are a helpful assistant."
+        system_prompt_content += "\n\nYou are using this model: "+ str(os.environ.get("API_MODEL"))
 
         self.messages: List[Dict] = [{"role": "system", "content": system_prompt_content}]
         self.summary: Optional[str] = None
