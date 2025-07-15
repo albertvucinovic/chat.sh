@@ -1,23 +1,4 @@
 #!/usr/bin/env python3
-"""
-CLI chat client that talks to a locally-hosted OpenAI-compatible endpoint.
-
-Key change 2025-07-15:
---------------------------------------------------
-The client now relies on OpenAI’s *native* tool-calling protocol instead
-of parsing fenced code blocks. It also streams tool code to the console
-as it's generated.
-
-Two tools are exposed to the model:
-
-  • bash(script: str)   – run a shell script via /bin/bash
-  • python(script: str) – exec a Python snippet in-process
-
-Everything else (auto-completion, local `b ` prefix, Ctrl shortcuts, file
-saving, etc.) is untouched.
---------------------------------------------------
-"""
-
 import os
 import sys
 import json
@@ -64,7 +45,6 @@ TOOLS = [
     },
 ]
 
-
 # ============================== Completer ============================== #
 class Completer:
     """
@@ -95,6 +75,19 @@ class Completer:
         except OSError:
             return set()
 
+    def _get_chat_files(self) -> List[str]:
+        """Gets all chat files from the chat directory, sorted by time descending."""
+        try:
+            chat_files = [
+                str(chat.name)
+                for chat in self.client.chat_dir.iterdir()
+                if chat.is_file() and chat.suffix == ".json"
+            ]
+            chat_files.sort(reverse=True)
+            return chat_files
+        except OSError:
+            return []
+
     def find_suggestions(self, line: List[str]):
         """
         Generate suggestions based on the word before the cursor.
@@ -114,18 +107,29 @@ class Completer:
             self.reset()
             return
 
-        history_words = self._get_words_from_history()
-        fs_words = self._get_words_from_filesystem()
-        all_words = history_words.union(fs_words)
+        # Handle "o " command for chat file completion
+        if current_text.startswith("o "):
+            chat_files = self._get_chat_files()
+            self.suggestions = sorted(
+                [
+                    chat_file
+                    for chat_file in chat_files
+                    if chat_file.lower().startswith(prefix.lower())
+                ]
+            )
+        else:
+            history_words = self._get_words_from_history()
+            fs_words = self._get_words_from_filesystem()
+            all_words = history_words.union(fs_words)
 
-        self.suggestions = sorted(
-            [
-                word
-                for word in all_words
-                if word.lower().startswith(prefix.lower())
-                and word.lower() != prefix.lower()
-            ]
-        )
+            self.suggestions = sorted(
+                [
+                    word
+                    for word in all_words
+                    if word.lower().startswith(prefix.lower())
+                    and word.lower() != prefix.lower()
+                ]
+            )
 
         if self.suggestions:
             self.active = True
@@ -172,7 +176,6 @@ class Completer:
         self.current_index = -1
         self.active = False
 
-
 # ======================== Interactive input ============================ #
 def get_multiline_input(client: "ChatClient") -> str:
     completer = Completer(client)
@@ -197,14 +200,14 @@ def get_multiline_input(client: "ChatClient") -> str:
         while True:
             char = sys.stdin.read(1)
 
-            # Ctrl+D – submit
+            # Ctrl+D â submit
             if not char or ord(char) == 4:
                 if current_line:
                     lines.append("".join(current_line))
                 print()
                 break
 
-            # Ctrl+C – save & quit
+            # Ctrl+C â save & quit
             elif ord(char) == 3:
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
                 print("\nSaving chat and exiting...")
@@ -218,7 +221,7 @@ def get_multiline_input(client: "ChatClient") -> str:
                 print(f"Chat saved to: {saved_path}")
                 sys.exit(0)
 
-            # Ctrl+E – clear
+            # Ctrl+E â clear
             elif ord(char) == 5:
                 _clear_suggestions()
                 sys.stdout.write("\r" + CLEAR_ENTIRE_LINE)
@@ -284,7 +287,6 @@ def get_multiline_input(client: "ChatClient") -> str:
 
     return "\n".join(lines)
 
-
 # ============================== Executors ============================== #
 def run_bash_script(script: str) -> str:
     """Executes a bash script and captures its stdout and stderr."""
@@ -309,7 +311,6 @@ def run_bash_script(script: str) -> str:
     except Exception as e:
         return f"--- STDERR ---\nError executing command: {e}"
 
-
 def run_python_script(script: str) -> str:
     """Executes a Python script string and captures its output."""
     old_stdout, old_stderr = sys.stdout, sys.stderr
@@ -333,7 +334,6 @@ def run_python_script(script: str) -> str:
     except Exception as e:
         sys.stdout, sys.stderr = old_stdout, old_stderr
         return f"--- STDERR ---\nError executing Python script: {e}"
-
 
 # ============================== Chat client ============================ #
 class ChatClient:
@@ -414,7 +414,7 @@ class ChatClient:
         )
 
     # ------------------------------------------------------------
-    # Send a user message – stream assistant deltas, handle tools
+    # Send a user message â stream assistant deltas, handle tools
     # ------------------------------------------------------------
     def send_message(self, message: str):
         self.messages.append({"role": "user", "content": message})
@@ -474,7 +474,7 @@ class ChatClient:
                                     "type": "function",
                                     "function": {"name": "", "arguments": ""},
                                 }
-                            
+
                             # Safely get the full tool call object using its index
                             tc_full = tool_calls_buf[index]
 
@@ -486,7 +486,7 @@ class ChatClient:
                                 f_delta = tc_delta["function"]
                                 if "name" in f_delta and f_delta["name"]:
                                     tc_full["function"]["name"] = f_delta["name"]
-                                
+
                                 # Live display logic (now keyed by index)
                                 if index not in printed_tool_headers and tc_full["function"]["name"]:
                                     print(f"\n\n[Tool Call: {tc_full['function']['name']}]\n")
@@ -526,7 +526,6 @@ class ChatClient:
                 print(f"\nError: {e}", file=sys.stderr)
                 return
 
-
     # --------------- lightweight context push --------------- #
     def send_context_only(self, message: str):
         self.messages.append({"role": "user", "content": message})
@@ -558,6 +557,31 @@ class ChatClient:
             json.dump(self.messages, f, indent=2)
         return str(file_path)
 
+    # --------------- load chat --------------- #
+    def load_chat(self, chat_name: str):
+        chat_file = self.chat_dir / chat_name
+        if chat_file.exists():
+            with open(chat_file, "r") as f:
+                self.messages = json.load(f)
+            print(f"Loaded chat: {chat_name}")
+
+            print("\n--- Previous conversation ---")
+            for msg in self.messages:
+                if msg["role"] == "system":
+                    continue
+                elif msg["role"] == "user":
+                    print(f"\n[You]:\n{msg['content']}")
+                elif msg["role"] == "assistant":
+                    summary = self.extract_summary(msg.get("content", ""))
+                    content_to_print = msg.get("content", "")
+                    if summary:
+                        content_to_print = content_to_print.replace(
+                            f"<summary>{summary}</summary>", ""
+                        ).strip()
+                    print(f"\n[Assistant]:\n{content_to_print}")
+            print("\n--- End of previous conversation ---\n")
+        else:
+            print(f"Chat file not found: {chat_name}")
 
 # ============================== CLI entry ============================== #
 def main():
@@ -588,30 +612,8 @@ def main():
         return
 
     if args.load:
-        chat_file = client.chat_dir / args.load
-        if chat_file.exists():
-            with open(chat_file, "r") as f:
-                client.messages = json.load(f)
-            print(f"Loaded chat: {args.load}")
-
-            print("\n--- Previous conversation ---")
-            for msg in client.messages:
-                if msg["role"] == "system":
-                    continue
-                elif msg["role"] == "user":
-                    print(f"\n[You]:\n{msg['content']}")
-                elif msg["role"] == "assistant":
-                    summary = client.extract_summary(msg.get("content", ""))
-                    content_to_print = msg.get("content", "")
-                    if summary:
-                        content_to_print = content_to_print.replace(
-                            f"<summary>{summary}</summary>", ""
-                        ).strip()
-                    print(f"\n[Assistant]:\n{content_to_print}")
-            print("\n--- End of previous conversation ---\n")
-        else:
-            print(f"Chat file not found: {args.load}")
-            return
+        client.load_chat(args.load)
+        return
 
     print(
         "Chat started. Press Tab to autocomplete. "
@@ -656,6 +658,15 @@ def main():
                     print("Empty bash command, skipping.")
                 continue
 
+            # Load chat command (prefix "o ")
+            elif user_input.startswith("o "):
+                chat_name = user_input[2:].strip()
+                if chat_name:
+                    client.load_chat(chat_name)
+                else:
+                    print("No chat name provided.")
+                continue
+
             # Normal chat flow (may trigger tool calls)
             client.send_message(user_input)
 
@@ -663,7 +674,6 @@ def main():
         print("\nSaving chat and exiting...")
         saved_path = client.save_chat()
         print(f"Chat saved to: {saved_path}")
-
 
 if __name__ == "__main__":
     main()
