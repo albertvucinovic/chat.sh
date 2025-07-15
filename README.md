@@ -54,7 +54,7 @@ The client supports features like tool calling, streaming responses, and local c
     - use vllm, sglang, ...
 
 4. **Set up environment variables**:
-   Create a `.env` file in the root directory of the project with your OpenAI API key and model configuration. This file will be sourced by `chat.sh`:
+   Create a `.env` file in the root directory of the project. This file will be sourced by `chat.sh`:
 
    - local api:
    ```bash
