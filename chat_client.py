@@ -42,9 +42,9 @@ TOOLS = [
 
 class ChatClient:
     # ... (__init__ and extract_summary are unchanged) ...
-    def __init__(self, base_url: str = "http://localhost:10000", token: str | None = None):
-        self.base_url = os.getenv("API_BASE", base_url)
-        self.token = token or os.environ.get("API_KEY")
+    def __init__(self):
+        self.base_url = os.getenv("API_BASE")
+        self.token = os.environ.get("API_KEY")
         if not self.token:
             raise ValueError(
                 "API token must be provided either directly or via OPENAI_API_KEY environment variable"
@@ -159,10 +159,10 @@ class ChatClient:
                 listener_thread.start()
 
                 response = requests.post(
-                    f"{self.base_url}/v1/chat/completions",
+                    f"{self.base_url}",
                     headers=self.headers,
                     json={
-                        "model": os.environ.get("LOCAL_OPENAI_API_MODEL"),
+                        "model": os.environ.get("API_MODEL"),
                         "messages": self.messages,
                         "tools": self.tools,
                         "tool_choice": "auto",
