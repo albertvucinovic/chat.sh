@@ -196,16 +196,25 @@ class ChatClient:
                         break
 
                     chunk = json.loads(data)
-                    choice = chunk["choices"][0]
+                    
+                    # Add a guard clause to prevent IndexError
+                    choices = chunk.get("choices")
+                    if not choices:
+                        continue # Skip this chunk if it has no choices array
+
+                    choice = choices[0]
                     delta = choice.get("delta", {})
 
-                    if "content" in delta and delta["content"]:
+                    # Safely handle content
+                    if delta.get("content"):
                         txt = delta["content"]
                         assistant_text_parts.append(txt)
                         _raw_print(txt)
 
-                    if "tool_calls" in delta:
-                        for tc_delta in delta["tool_calls"]:
+                    # Safely handle tool calls
+                    tool_calls_chunk = delta.get("tool_calls")
+                    if tool_calls_chunk:
+                        for tc_delta in tool_calls_chunk:
                             index = tc_delta["index"]
                             if index not in tool_calls_buf:
                                 tool_calls_buf[index] = {
@@ -269,15 +278,16 @@ class ChatClient:
 
             continue
 
+
     # ... (send_context_only, save_chat, load_chat are unchanged) ...
     def send_context_only(self, message: str):
         self.messages.append({"role": "user", "content": message})
         try:
             requests.post(
-                f"{self.base_url}/v1/chat/completions",
+                f"{self.base_url}",
                 headers=self.headers,
                 json={
-                    "model": os.environ.get("LOCAL_OPENAI_API_MODEL"),
+                    "model": os.environ.get("API_MODEL"),
                     "messages": self.messages,
                     "stream": False,
                     "max_tokens": 1,
