@@ -2,6 +2,7 @@ import os
 import sys
 import termios
 import tty
+import signal
 from io import StringIO
 from typing import List, Optional
 
@@ -15,7 +16,6 @@ def get_multiline_input(client: ChatClient) -> str:
     MOVE_UP_1 = "\x1b[A"
 
     def _clear_suggestions():
-        """Resets completer state."""
         if completer.active:
             completer.reset()
 
@@ -23,6 +23,7 @@ def get_multiline_input(client: ChatClient) -> str:
     lines: List[str] = []
     current_line: List[str] = []
 
+    # This function now fully manages its own terminal state
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
     try:
@@ -38,22 +39,13 @@ def get_multiline_input(client: ChatClient) -> str:
                 print()
                 break
 
-            # Ctrl+C - save & quit
+            # Ctrl+C - Raise KeyboardInterrupt to be caught by the global handler
             elif ord(char) == 3:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-                print("\nSaving chat and exiting...")
-                if current_line or lines:
-                    if current_line:
-                        lines.append("".join(current_line))
-                    final_input = "\n".join(lines)
-                    if final_input.strip():
-                        client.messages.append({"role": "user", "content": final_input})
-                saved_path = client.save_chat()
-                print(f"Chat saved to: {saved_path}")
-                sys.exit(0)
+                # Re-raise the interrupt signal to be caught by the main loop's handler
+                raise KeyboardInterrupt
 
-            # Ctrl+E - clear
-            elif ord(char) == 5:
+            # ... (rest of the input handling logic is the same) ...
+            elif ord(char) == 5: # Ctrl+E
                 _clear_suggestions()
                 sys.stdout.write("\r" + CLEAR_ENTIRE_LINE)
                 for _ in range(len(lines)):
@@ -64,9 +56,7 @@ def get_multiline_input(client: ChatClient) -> str:
                 sys.stdout.write("[You]: ")
                 sys.stdout.flush()
                 continue
-
-            # Tab or Shift+Tab (Esc [ Z)
-            elif char == "\t" or char == "\x1b":
+            elif char == "\t" or char == "\x1b": # Tab or Shift+Tab
                 if char == "\x1b":
                     next_chars = sys.stdin.read(2)
                     if next_chars != "[Z":
@@ -99,21 +89,25 @@ def get_multiline_input(client: ChatClient) -> str:
                 current_line = []
                 sys.stdout.write("\r\n")
                 sys.stdout.flush()
-
-            # Backspace
-            elif ord(char) == 127:
+            elif ord(char) == 127: # Backspace
                 if current_line:
                     current_line.pop()
                     sys.stdout.write("\b \b")
                     sys.stdout.flush()
-
             else:
                 if char.isprintable():
                     current_line.append(char)
                     sys.stdout.write(char)
                     sys.stdout.flush()
 
+    except KeyboardInterrupt:
+        # Ensure terminal is restored before propagating the interrupt
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        # The global signal handler in chat.py will now take over
+        os.kill(os.getpid(), signal.SIGINT)
+
     finally:
+        # Always restore the terminal settings when input is finished
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
     return "\n".join(lines)

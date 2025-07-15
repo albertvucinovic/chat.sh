@@ -7,10 +7,12 @@ import requests
 from pathlib import Path
 from typing import List, Dict, Optional
 from executors import run_bash_script, run_python_script
+import threading
+import select
+import termios
+import tty
 
-# ---------------------------------------------------------------------
-# Native tool schema we expose to the LLM
-# ---------------------------------------------------------------------
+# ... (TOOLS definition is unchanged) ...
 TOOLS = [
     {
         "type": "function",
@@ -39,6 +41,7 @@ TOOLS = [
 ]
 
 class ChatClient:
+    # ... (__init__ and extract_summary are unchanged) ...
     def __init__(self, base_url: str = "http://localhost:10000", token: str | None = None):
         self.base_url = os.getenv("OPENAI_API_BASE", base_url)
         self.token = token or os.environ.get("LOCAL_OPENAI_API_KEY")
@@ -83,29 +86,50 @@ class ChatClient:
             return None
         return text[start_index:end_index].strip()
 
-    # ------------------------------------------------------------
-    # Helper: run one tool call requested by the model
-    # ------------------------------------------------------------
-    def _handle_tool_call(self, call: Dict):
-        # --- MODIFIED: Simplified to only handle execution after streaming ---
-        fn_name = call["function"]["name"]
-        # FIX: Handle empty arguments string to prevent JSONDecodeError
-        args_str = call["function"].get("arguments", "{}") or "{}"
-        args = json.loads(args_str)
-        script = args.get("script", "")
-        call_id = call["id"]
+    def _interrupt_listener(self, interrupt_event: threading.Event, stop_event: threading.Event):
+        if not sys.stdin.isatty():
+            return
 
-        # The user has already seen the code stream in. Just ask for confirmation.
-        confirm = input(f"\nExecute the above '{fn_name}' tool call? [y/N]: ").lower().strip()
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            while not stop_event.is_set():
+                if select.select([sys.stdin], [], [], 0.1)[0]:
+                    char = sys.stdin.read(1)
+                    if ord(char) == 9: # Ctrl+I (Tab)
+                        interrupt_event.set()
+                        break
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    def _handle_tool_call(self, call: Dict):
+        fn_name = call["function"]["name"]
+        try:
+            args_str = call["function"].get("arguments", "{}") or "{}"
+            args = json.loads(args_str)
+            script = args.get("script", "")
+        except json.JSONDecodeError:
+            print(f"\nError: Could not decode arguments for tool {fn_name}.", file=sys.stderr)
+            return
+
+        call_id = call["id"]
+        
+        # This now runs in a normal terminal, so input() works correctly.
+        # We re-print the tool call so the user knows what they are confirming.
+        print(f"\n[Tool Call: {fn_name}]")
+        print("```" + fn_name)
+        print(script)
+        print("```")
+        confirm = input(f"Execute the above '{fn_name}' tool call? [y/N]: ").lower().strip()
 
         if confirm != "y":
             output = "--- SKIPPED BY USER ---"
         else:
             print("Executing...")
             output = run_bash_script(script) if fn_name == "bash" else run_python_script(script)
-            print(output)
+            print(output) # This print is also safe now.
 
-        # Send the result back so the model can see it
         self.messages.append(
             {
                 "role": "tool",
@@ -115,17 +139,25 @@ class ChatClient:
             }
         )
 
-    # ------------------------------------------------------------
-    # Send a user message ÃÂ¢ stream assistant deltas, handle tools
-    # ------------------------------------------------------------
     def send_message(self, message: str):
         self.messages.append({"role": "user", "content": message})
 
         while True:
+            interrupt_event = threading.Event()
+            stop_listener_event = threading.Event()
+            listener_thread = threading.Thread(
+                target=self._interrupt_listener,
+                args=(interrupt_event, stop_listener_event),
+                daemon=True,
+            )
+
+            assistant_text_parts: list[str] = []
+            tool_calls_buf: dict[int, dict] = {}
+            interrupted = False
+
             try:
-                mistral_model = "mistral" in os.environ.get("LOCAL_OPENAI_API_MODEL", "").lower()
-                should_stream   = not mistral_model          # disable streaming for Mistral
-                should_stream = True
+                listener_thread.start()
+
                 response = requests.post(
                     f"{self.base_url}/v1/chat/completions",
                     headers=self.headers,
@@ -134,21 +166,29 @@ class ChatClient:
                         "messages": self.messages,
                         "tools": self.tools,
                         "tool_choice": "auto",
-                        "stream": should_stream,
+                        "stream": True,
                     },
                     timeout=120,
                     stream=True,
                 )
                 response.raise_for_status()
 
-                assistant_text_parts: list[str] = []
-                # --- MODIFICATION: The buffer is now keyed by the tool's index (int) ---
-                tool_calls_buf: dict[int, dict] = {}
                 printed_tool_headers = set()
 
-                print("\n[Assistant]: ", end="", flush=True)
+                def _raw_print(text: str):
+                    """A print function that is safe to use in a raw terminal."""
+                    sys.stdout.write(text.replace("\n", "\r\n"))
+                    sys.stdout.flush()
+
+                _raw_print("\n[Assistant]: ")
 
                 for raw in response.iter_lines(decode_unicode=True):
+                    if interrupt_event.is_set():
+                        sys.stdout.write("\r\x1b[2K\r\n[Interrupted by user]\r\n")
+                        sys.stdout.flush()
+                        interrupted = True
+                        break
+
                     if not raw or not raw.startswith("data: "):
                         continue
                     data = raw[6:]
@@ -162,73 +202,74 @@ class ChatClient:
                     if "content" in delta and delta["content"]:
                         txt = delta["content"]
                         assistant_text_parts.append(txt)
-                        print(txt, end="", flush=True)
+                        _raw_print(txt)
 
                     if "tool_calls" in delta:
                         for tc_delta in delta["tool_calls"]:
-                            # --- MODIFICATION: Use index as the primary identifier ---
                             index = tc_delta["index"]
-
-                            # Initialize the buffer for this index if it's the first time we see it
                             if index not in tool_calls_buf:
                                 tool_calls_buf[index] = {
-                                    "id": None,
-                                    "type": "function",
+                                    "id": None, "type": "function",
                                     "function": {"name": "", "arguments": ""},
                                 }
-
-                            # Safely get the full tool call object using its index
                             tc_full = tool_calls_buf[index]
-
-                            # Capture the ID when it arrives
                             if "id" in tc_delta and tc_delta["id"]:
                                 tc_full["id"] = tc_delta["id"]
-
                             if "function" in tc_delta:
                                 f_delta = tc_delta["function"]
                                 if "name" in f_delta and f_delta["name"]:
                                     tc_full["function"]["name"] = f_delta["name"]
-
-                                # Live display logic (now keyed by index)
                                 if index not in printed_tool_headers and tc_full["function"]["name"]:
-                                    print(f"\n\n[Tool Call: {tc_full['function']['name']}]\n")
+                                    _raw_print(f"\n\n[Tool Call: {tc_full['function']['name']}]\n")
                                     printed_tool_headers.add(index)
-
                                 if "arguments" in f_delta:
                                     args_chunk = f_delta["arguments"]
-                                    print(args_chunk, end="", flush=True)
+                                    _raw_print(args_chunk)
                                     tc_full["function"]["arguments"] += args_chunk
+                
+                _raw_print("\n")
 
-                print()
-
-                assistant_msg: dict = {"role": "assistant"}
-
-                full_text = "".join(assistant_text_parts).strip()
-                if full_text:
-                    assistant_msg["content"] = full_text
-                    self.summary = self.extract_summary(full_text)
-
-                if tool_calls_buf:
-                    # Convert the dict of tool calls back to a list for the message
-                    assistant_msg["tool_calls"] = list(tool_calls_buf.values())
-
-                # It's possible to get tool calls without any text content
-                if full_text or tool_calls_buf:
-                    self.messages.append(assistant_msg)
-
-                if not tool_calls_buf:
-                    return
-
-                for tc in assistant_msg["tool_calls"]:
-                    self._handle_tool_call(tc)
-
-                continue
-
-            except requests.exceptions.RequestException as e:
+            except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
                 print(f"\nError: {e}", file=sys.stderr)
+                interrupted = True # Treat errors as an interruption
+            finally:
+                # CRITICAL: Stop the listener and restore the terminal BEFORE any more interaction.
+                stop_listener_event.set()
+                if listener_thread.is_alive():
+                    listener_thread.join()
+
+            # --- POST-STREAMING ---
+            # The terminal is now back in NORMAL mode.
+            
+            assistant_msg: dict = {"role": "assistant"}
+            full_text = "".join(assistant_text_parts).strip()
+
+            if interrupted and full_text:
+                full_text += "\n\n--- Interrupted by user ---"
+
+            if full_text:
+                assistant_msg["content"] = full_text
+                self.summary = self.extract_summary(full_text)
+
+            if tool_calls_buf:
+                assistant_msg["tool_calls"] = list(tool_calls_buf.values())
+
+            if full_text or tool_calls_buf:
+                self.messages.append(assistant_msg)
+
+            if interrupted:
                 return
 
-    # --------------- lightweight context push --------------- #
+            if not tool_calls_buf:
+                return
+
+            # Now that the terminal is normal, loop through and handle each tool call.
+            for tc in assistant_msg["tool_calls"]:
+                self._handle_tool_call(tc)
+
+            continue
+
+    # ... (send_context_only, save_chat, load_chat are unchanged) ...
     def send_context_only(self, message: str):
         self.messages.append({"role": "user", "content": message})
         try:
@@ -243,11 +284,10 @@ class ChatClient:
                 },
                 timeout=120,
             ).raise_for_status()
-        except requests.exceptions.RequestException as e:
+        except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
             print(f"\nError: Failed to send context to LLM: {e}", file=sys.stderr)
             self.messages.pop()
 
-    # --------------- persistence --------------- #
     def save_chat(self) -> str:
         summary = self.summary if self.summary else "unnamed_chat"
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -259,7 +299,6 @@ class ChatClient:
             json.dump(self.messages, f, indent=2)
         return str(file_path)
 
-    # --------------- load chat --------------- #
     def load_chat(self, chat_name: str):
         chat_file = self.chat_dir / chat_name
         if chat_file.exists():
