@@ -4,3 +4,4 @@
 *.swp
 venv
 localChats
+__pycache*

@@ -43,8 +43,8 @@ TOOLS = [
 class ChatClient:
     # ... (__init__ and extract_summary are unchanged) ...
     def __init__(self, base_url: str = "http://localhost:10000", token: str | None = None):
-        self.base_url = os.getenv("OPENAI_API_BASE", base_url)
-        self.token = token or os.environ.get("LOCAL_OPENAI_API_KEY")
+        self.base_url = os.getenv("API_BASE", base_url)
+        self.token = token or os.environ.get("API_KEY")
         if not self.token:
             raise ValueError(
                 "API token must be provided either directly or via OPENAI_API_KEY environment variable"

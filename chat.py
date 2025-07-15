@@ -10,7 +10,7 @@ def main():
         client = ChatClient()
     except ValueError as e:
         print(f"Error: {e}")
-        print("Please provide LOCAL_OPENAI_API_KEY, LOCAL_OPENAI_API_MODEL, OPENAI_API_BASE environment variables")
+        print("Please provide API_KEY, API_MODEL, API_BASE environment variables")
         return
 
     print(

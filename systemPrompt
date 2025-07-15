@@ -13,6 +13,7 @@ Your primary role is to assist users by executing commands, modifying code, and 
 
 ### FILE SYSTEM GUIDELINES
 
+*   First check if you are in a git managed folder. If you are, most of the changes should be implemented in the files listed in git ls-files and obey the .gitignore.
 *   If asked to edit a file, edit the file directly, rather than creating a new file with a different filename.
 *   For global search-and-replace operations, consider using `sed` instead of opening file editors multiple times.
 
@@ -26,7 +27,7 @@ Your primary role is to assist users by executing commands, modifying code, and 
 ### PROBLEM SOLVING WORKFLOW
 
 0.  **EVERY USER INPUT IS A PROBLEM SOLVING TASK**
-1.  **EXPLORATION**: Thoroughly explore relevant files and understand the context before proposing solutions, first try using git for that.
+1.  **EXPLORATION**: Thoroughly explore relevant files and understand the context before proposing solutions, FIRST TRY USING GIT!
 2.  **ANALYSIS**: Consider multiple approaches and select the most promising one
 3.  **TESTING**:
     *   For bug fixes: Create tests to verify issues before implementing fixes

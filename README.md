@@ -34,10 +34,9 @@ This project provides a CLI chat client that connects to a locally-hosted OpenAI
 3. **Set up environment variables**:
    Create a `.env` file with your OpenAI API key and model configuration:
    ```bash
-   export LOCAL_OPENAI_API_KEY='your-api-key'
-   export LOCAL_OPENAI_API_MODEL='path/to/your/model'
-   export OPENAI_API_BASE=http://localhost:10000
-   export OPENAI_API_KEY='your-api-key'
+   export API_KEY='your-api-key'
+   export API_MODEL='path/to/your/model'
+   export API_BASE=http://localhost:10000
    ```
 
 4. **Run the chat client**:
@@ -57,15 +56,15 @@ The client exposes two primary tools to the model:
 The `.env` file contains various model configuration options. Uncomment and modify the appropriate lines to select your desired model:
 
 ```bash
-# export LOCAL_OPENAI_API_MODEL='Models/Qwen/Qwen3-30B-A3B-Q8_0.gguf'
-# export LOCAL_OPENAI_API_MODEL='../vllm/Models/Qwen/Qwen3-30B-A3B-Q8_0.gguf'
-# export LOCAL_OPENAI_API_MODEL='Qwen/Qwen3-32B-AWQ'
-# export LOCAL_OPENAI_API_MODEL='Models/mistralai/Devstral-Small-2507-Q8_0.gguf'
-# export LOCAL_OPENAI_API_MODEL='Valdemardi/DeepSeek-R1-Distill-Qwen-32B-AWQ'
-# export LOCAL_OPENAI_API_MODEL='kosbu/Llama-3.3-70B-Instruct-AWQ'
-# export LOCAL_OPENAI_API_MODEL='Qwen/Qwen2.5-Coder-32B-Instruct-AWQ'
-# export LOCAL_OPENAI_API_MODEL='KirillR/QwQ-32B-Preview-AWQ'
-# export LOCAL_OPENAI_API_MODEL='Qwen/Qwen2.5-72B-Instruct-AWQ'
+# export API_MODEL='Models/Qwen/Qwen3-30B-A3B-Q8_0.gguf'
+# export API_MODEL='../vllm/Models/Qwen/Qwen3-30B-A3B-Q8_0.gguf'
+# export API_MODEL='Qwen/Qwen3-32B-AWQ'
+# export API_MODEL='Models/mistralai/Devstral-Small-2507-Q8_0.gguf'
+# export API_MODEL='Valdemardi/DeepSeek-R1-Distill-Qwen-32B-AWQ'
+# export API_MODEL='kosbu/Llama-3.3-70B-Instruct-AWQ'
+# export API_MODEL='Qwen/Qwen2.5-Coder-32B-Instruct-AWQ'
+# export API_MODEL='KirillR/QwQ-32B-Preview-AWQ'
+# export API_MODEL='Qwen/Qwen2.5-72B-Instruct-AWQ'
 ```
 
 ## Usage
@@ -86,6 +85,7 @@ b ls -la
 - **Ctrl+D**: Submit input
 - **Ctrl+C**: Save chat and exit
 - **Ctrl+E**: Clear input
+- **Ctrl+I**: Interrupt the generation
 - **Tab**: Autocomplete words from history or filesystem
 - **Shift+Tab**: Cycle through previous suggestions
 
