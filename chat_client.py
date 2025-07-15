@@ -141,6 +141,8 @@ class ChatClient:
             }
         )
 
+
+
     def send_message(self, message: str):
         self.messages.append({"role": "user", "content": message})
 
@@ -198,14 +200,9 @@ class ChatClient:
                         break
 
                     chunk = json.loads(data)
-                    # --- TEMPORARY DEBUGGING ---
-                    #print(f"\nCHUNK>>> {chunk}")
-                    # --- END DEBUGGING ---
-                    
-                    # Add a guard clause to prevent IndexError
                     choices = chunk.get("choices")
                     if not choices:
-                        continue # Skip this chunk if it has no choices array
+                        continue
 
                     choice = choices[0]
                     delta = choice.get("delta", {})
@@ -216,81 +213,97 @@ class ChatClient:
                         assistant_text_parts.append(txt)
                         _raw_print(txt)
 
-                    # Safely handle tool calls
+                    # Safely handle standard tool calls
                     tool_calls_chunk = delta.get("tool_calls")
                     if tool_calls_chunk:
                         for index, tc_delta in enumerate(tool_calls_chunk):
-                            # Use the index from the delta if present (OpenAI-style), otherwise use the enumerated index (Gemini-style).
                             buffer_index = tc_delta.get("index", index)
-
-                            # Initialize the buffer for this tool call if it's new.
                             if buffer_index not in tool_calls_buf:
-                                tool_calls_buf[buffer_index] = {
-                                    "id": f"call_{uuid.uuid4().hex[:10]}", # Generate a fallback ID
-                                    "type": "function",
-                                    "function": {"name": "", "arguments": ""},
-                                }
+                                tool_calls_buf[buffer_index] = {"id": f"call_{uuid.uuid4().hex[:10]}", "type": "function", "function": {"name": "", "arguments": ""}}
                             tc_full = tool_calls_buf[buffer_index]
-
-                            # --- Aggregate Data ---
-                            name_was_known = bool(tc_full["function"]["name"])
-
-                            # If the API provides a real, non-empty ID, overwrite our fallback.
-                            if tc_delta.get("id"):
-                                tc_full["id"] = tc_delta["id"]
-
+                            if tc_delta.get("id"): tc_full["id"] = tc_delta["id"]
                             f_delta = tc_delta.get("function", {})
                             newly_received_args = f_delta.get("arguments", "")
-
-                            if f_delta.get("name"):
-                                tc_full["function"]["name"] = f_delta["name"]
-                            if newly_received_args:
-                                tc_full["function"]["arguments"] += newly_received_args
-
-                            # --- Smart Printing Logic for BOTH Stream Types ---
+                            name_was_known = bool(tc_full["function"]["name"])
+                            if f_delta.get("name"): tc_full["function"]["name"] = f_delta["name"]
+                            if newly_received_args: tc_full["function"]["arguments"] += newly_received_args
                             name_just_appeared = tc_full["function"]["name"] and not name_was_known
-
-                            # 1. Print the header ONLY if the name was just discovered.
-                            if name_just_appeared:
-                                _raw_print(f"\n\n[Tool Call: {tc_full['function']['name']}]\n")
-                                printed_tool_headers.add(buffer_index)
-
-                            # 2. Print the content of the arguments.
+                            if name_just_appeared: _raw_print(f"\n\n[Tool Call: {tc_full['function']['name']}]\n")
                             if newly_received_args:
-                                # Check if this is an "all-in-one" chunk (Gemini-style).
                                 is_all_in_one_chunk = name_just_appeared and tc_full['function']['arguments'] == newly_received_args
-
                                 if is_all_in_one_chunk:
-                                    # Format the complete script block nicely.
                                     try:
-                                        # The arguments are a JSON string, so we load it into a dict
                                         args_dict = json.loads(newly_received_args)
                                         script_content = args_dict.get('script', '')
-                                        _raw_print("```" + tc_full['function']['name'] + "\n")
-                                        _raw_print(script_content)
-                                        _raw_print("\n```")
+                                        _raw_print("```" + tc_full['function']['name'] + "\n" + script_content + "\n```")
                                     except Exception:
-                                        # Fallback for safety if parsing fails
                                         _raw_print(newly_received_args)
                                 else:
-                                    # Otherwise, it's a fragmented stream (OpenAI-style), so just print the piece we got.
                                     _raw_print(newly_received_args)
                 _raw_print("\n")
 
             except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
                 print(f"\nError: {e}", file=sys.stderr)
-                interrupted = True # Treat errors as an interruption
+                interrupted = True
             finally:
-                # CRITICAL: Stop the listener and restore the terminal BEFORE any more interaction.
                 stop_listener_event.set()
                 if listener_thread.is_alive():
                     listener_thread.join()
 
             # --- POST-STREAMING ---
-            # The terminal is now back in NORMAL mode.
-            
             assistant_msg: dict = {"role": "assistant"}
             full_text = "".join(assistant_text_parts).strip()
+
+            ### START of new logic ###
+            # This block handles models that stream tool calls as a JSON string in the 'content' field.
+            # It only runs if the standard 'tool_calls' field was not found in the stream.
+            if not tool_calls_buf and full_text.strip().startswith('{'):
+                try:
+                    potential_tool_json = json.loads(full_text)
+                    if isinstance(potential_tool_json, dict) and "tool_calls" in potential_tool_json:
+                        # This is a "JSON-in-Content" tool call.
+                        parsed_tool_calls = potential_tool_json["tool_calls"]
+                        
+                        # Clear the ugly raw JSON that was printed to the screen.
+                        num_lines = full_text.count('\n') + 2
+                        sys.stdout.write(f"\r\x1b[{num_lines}A\r\x1b[J")
+                        sys.stdout.flush()
+                        
+                        _raw_print("\n[Assistant]: ")
+                        
+                        for i, malformed_tc in enumerate(parsed_tool_calls):
+                            # --- Transformation Step ---
+                            # Read from the non-standard flat structure
+                            tc_name = malformed_tc.get("name", "unknown_tool")
+                            tc_args_obj = malformed_tc.get("arguments", {})
+
+                            # Build the standard, compliant tool call object that the rest of the script expects
+                            standard_tc = {
+                                "id": malformed_tc.get("id", f"call_{uuid.uuid4().hex[:10]}"),
+                                "type": "function",
+                                "function": {
+                                    "name": tc_name,
+                                    "arguments": json.dumps(tc_args_obj) # Convert args dict back to a JSON string
+                                }
+                            }
+
+                            # --- Printing Step (uses data we just extracted) ---
+                            _raw_print(f"\n[Tool Call: {tc_name}]\n")
+                            try:
+                                script = tc_args_obj.get('script', '') # Get script from the args dict
+                                _raw_print("```" + tc_name + "\n" + script + "\n```\n")
+                            except Exception:
+                                _raw_print(f"Could not parse arguments: {tc_args_obj}\n")
+                            
+                            # --- Buffering Step (stores the *compliant* object) ---
+                            tool_calls_buf[i] = standard_tc
+
+                        # Nullify the full_text so it's not processed as a regular message.
+                        full_text = ""
+                except json.JSONDecodeError:
+                    # It looked like JSON, but wasn't. Treat as regular text.
+                    pass
+            ### END of new logic ###
 
             if interrupted and full_text:
                 full_text += "\n\n--- Interrupted by user ---"
@@ -300,9 +313,13 @@ class ChatClient:
                 self.summary = self.extract_summary(full_text)
 
             if tool_calls_buf:
+                # Ensure all tool calls have a valid ID before saving
+                for tc in tool_calls_buf.values():
+                    if not tc.get("id"):
+                        tc["id"] = f"call_{uuid.uuid4().hex[:10]}"
                 assistant_msg["tool_calls"] = list(tool_calls_buf.values())
 
-            if full_text or tool_calls_buf:
+            if assistant_msg.get("content") or assistant_msg.get("tool_calls"):
                 self.messages.append(assistant_msg)
 
             if interrupted:
@@ -311,12 +328,10 @@ class ChatClient:
             if not tool_calls_buf:
                 return
 
-            # Now that the terminal is normal, loop through and handle each tool call.
-            for tc in assistant_msg["tool_calls"]:
+            for tc in assistant_msg.get("tool_calls", []):
                 self._handle_tool_call(tc)
 
             continue
-
 
     # ... (send_context_only, save_chat, load_chat are unchanged) ...
     def send_context_only(self, message: str):
