@@ -37,6 +37,7 @@ def get_multiline_input(client: ChatClient) -> str:
                 if current_line:
                     lines.append("".join(current_line))
                 print()
+                sys.stdout.write("\r")
                 break
 
             # Ctrl+C - Raise KeyboardInterrupt to be caught by the global handler
