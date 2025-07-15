@@ -5,10 +5,12 @@ CLI chat client that talks to a locally-hosted OpenAI-compatible endpoint.
 Key change 2025-07-15:
 --------------------------------------------------
 The client now relies on OpenAI’s *native* tool-calling protocol instead
-of parsing fenced code blocks.  
+of parsing fenced code blocks. It also streams tool code to the console
+as it's generated.
+
 Two tools are exposed to the model:
 
-  • bash(script: str)   – run a shell script via /bin/bash  
+  • bash(script: str)   – run a shell script via /bin/bash
   • python(script: str) – exec a Python snippet in-process
 
 Everything else (auto-completion, local `b ` prefix, Ctrl shortcuts, file
@@ -23,7 +25,7 @@ import argparse
 import datetime
 import re
 import signal
-import textwrap            # NEW
+import textwrap
 from pathlib import Path
 import requests
 from typing import List, Dict, Set, Optional
@@ -383,16 +385,16 @@ class ChatClient:
     # Helper: run one tool call requested by the model
     # ------------------------------------------------------------
     def _handle_tool_call(self, call: Dict):
+        # --- MODIFIED: Simplified to only handle execution after streaming ---
         fn_name = call["function"]["name"]
-        args = json.loads(call["function"]["arguments"])
+        # FIX: Handle empty arguments string to prevent JSONDecodeError
+        args_str = call["function"].get("arguments", "{}") or "{}"
+        args = json.loads(args_str)
         script = args.get("script", "")
-        call_id = call["id"]                      # required for the reply
+        call_id = call["id"]
 
-        print("\n----------------------------------------")
-        print(f"LLM wants to run {fn_name}:\n")
-        print(script)
-        print("----------------------------------------")
-        confirm = input("Execute? [y/N]: ").lower().strip()
+        # The user has already seen the code stream in. Just ask for confirmation.
+        confirm = input(f"\nExecute the above '{fn_name}' tool call? [y/N]: ").lower().strip()
 
         if confirm != "y":
             output = "--- SKIPPED BY USER ---"
@@ -415,20 +417,9 @@ class ChatClient:
     # Send a user message – stream assistant deltas, handle tools
     # ------------------------------------------------------------
     def send_message(self, message: str):
-        """
-        1. POST /v1/chat/completions with stream=True and tool schema.
-        2. As chunks arrive:
-           • immediately print any assistant text
-           • incrementally assemble tool-call objects
-        3. When the stream ends:
-           • add the full assistant message to self.messages
-           • if tool calls were issued, execute / skip them
-             then loop so the model can see the tool outputs.
-        """
-        # add the user turn
         self.messages.append({"role": "user", "content": message})
 
-        while True:                                  # may loop after tool calls
+        while True:
             try:
                 response = requests.post(
                     f"{self.base_url}/v1/chat/completions",
@@ -438,95 +429,100 @@ class ChatClient:
                         "messages": self.messages,
                         "tools": self.tools,
                         "tool_choice": "auto",
-                        "stream": True,              # ← streaming enabled
+                        "stream": True,
                     },
                     timeout=120,
                     stream=True,
                 )
                 response.raise_for_status()
 
-                # buffers we fill while streaming
                 assistant_text_parts: list[str] = []
-                tool_calls_buf: dict[str, dict] = {}     # id -> complete object
+                # --- MODIFICATION: The buffer is now keyed by the tool's index (int) ---
+                tool_calls_buf: dict[int, dict] = {}
+                printed_tool_headers = set()
 
                 print("\n[Assistant]: ", end="", flush=True)
 
-                # ---------- stream loop ----------
                 for raw in response.iter_lines(decode_unicode=True):
-                    if not raw:
+                    if not raw or not raw.startswith("data: "):
                         continue
-                    if not raw.startswith("data: "):
-                        continue
-
                     data = raw[6:]
                     if data == "[DONE]":
-                        break                            # end of stream
+                        break
 
                     chunk = json.loads(data)
                     choice = chunk["choices"][0]
                     delta = choice.get("delta", {})
 
-                    # assistant text
-                    if "content" in delta:
+                    if "content" in delta and delta["content"]:
                         txt = delta["content"]
                         assistant_text_parts.append(txt)
                         print(txt, end="", flush=True)
 
-                    # incremental tool-call info
                     if "tool_calls" in delta:
                         for tc_delta in delta["tool_calls"]:
-                            tc_id = tc_delta.get("id")
-                            if tc_id not in tool_calls_buf:
-                                # create minimal skeleton
-                                tool_calls_buf[tc_id] = {
-                                    "id": tc_id,
-                                    "index": tc_delta["index"],
+                            # --- MODIFICATION: Use index as the primary identifier ---
+                            index = tc_delta["index"]
+
+                            # Initialize the buffer for this index if it's the first time we see it
+                            if index not in tool_calls_buf:
+                                tool_calls_buf[index] = {
+                                    "id": None,
+                                    "type": "function",
                                     "function": {"name": "", "arguments": ""},
                                 }
+                            
+                            # Safely get the full tool call object using its index
+                            tc_full = tool_calls_buf[index]
 
-                            tc_full = tool_calls_buf[tc_id]
+                            # Capture the ID when it arrives
+                            if "id" in tc_delta and tc_delta["id"]:
+                                tc_full["id"] = tc_delta["id"]
 
-                            # merge the partial delta
                             if "function" in tc_delta:
                                 f_delta = tc_delta["function"]
-                                if "name" in f_delta:
+                                if "name" in f_delta and f_delta["name"]:
                                     tc_full["function"]["name"] = f_delta["name"]
+                                
+                                # Live display logic (now keyed by index)
+                                if index not in printed_tool_headers and tc_full["function"]["name"]:
+                                    print(f"\n\n[Tool Call: {tc_full['function']['name']}]\n")
+                                    printed_tool_headers.add(index)
+
                                 if "arguments" in f_delta:
-                                    tc_full["function"]["arguments"] += f_delta["arguments"]
+                                    args_chunk = f_delta["arguments"]
+                                    print(args_chunk, end="", flush=True)
+                                    tc_full["function"]["arguments"] += args_chunk
 
-                # --------- finished streaming ----------
-
-                print()    # newline after assistant output
+                print()
 
                 assistant_msg: dict = {"role": "assistant"}
 
-                # final text
                 full_text = "".join(assistant_text_parts).strip()
                 if full_text:
                     assistant_msg["content"] = full_text
                     self.summary = self.extract_summary(full_text)
 
-                # final tool calls (if any)
                 if tool_calls_buf:
+                    # Convert the dict of tool calls back to a list for the message
                     assistant_msg["tool_calls"] = list(tool_calls_buf.values())
 
-                # store assistant turn exactly as we reconstructed it
-                self.messages.append(assistant_msg)
+                # It's possible to get tool calls without any text content
+                if full_text or tool_calls_buf:
+                    self.messages.append(assistant_msg)
 
-                # no tool calls ⇒ conversation turn is done
                 if not tool_calls_buf:
                     return
 
-                # otherwise handle each requested tool
                 for tc in assistant_msg["tool_calls"]:
                     self._handle_tool_call(tc)
 
-                # … and loop so model can react to the tool results
                 continue
 
             except requests.exceptions.RequestException as e:
                 print(f"\nError: {e}", file=sys.stderr)
                 return
+
 
     # --------------- lightweight context push --------------- #
     def send_context_only(self, message: str):
