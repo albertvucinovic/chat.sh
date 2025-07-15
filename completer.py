@@ -1,5 +1,6 @@
 import os
 import re
+import glob
 from typing import List, Set, Optional
 
 class Completer:
@@ -7,6 +8,8 @@ class Completer:
     Manages completion state and suggestion generation from history and
     the filesystem.
     """
+    # Define delimiters that separate "words", excluding path separators.
+    WORD_DELIMITERS = " `~!@#$%^&*()=+[{]}|;:'\",<>"
 
     def __init__(self, client: "ChatClient"):
         self.client = client
@@ -17,19 +20,34 @@ class Completer:
     def _get_words_from_history(self) -> Set[str]:
         """Extracts all unique words from the message history."""
         words = set()
-        word_regex = re.compile(r"[\w.-]+")
+        # This regex can be simpler as we handle delimiters separately
+        word_regex = re.compile(r"[^\s" + re.escape(self.WORD_DELIMITERS) + "]+")
         for message in self.client.messages:
             content = message.get("content", "")
-            found_words = word_regex.findall(content.lower())
-            words.update(found_words)
+            found_words = word_regex.findall(content)
+            words.update(w for w in found_words if os.path.sep not in w)
         return words
 
-    def _get_words_from_filesystem(self) -> Set[str]:
-        """Gets all file and directory names from the current directory."""
+    def _get_filesystem_suggestions(self, prefix: str) -> List[str]:
+        """
+        Gets suggestions from the filesystem using glob, handling subdirectories.
+        Appends a path separator to directories.
+        """
         try:
-            return set(os.listdir("."))
-        except OSError:
-            return set()
+            # Use glob to find all matching paths. The '*' handles completion.
+            matches = glob.glob(prefix + '*')
+            
+            suggestions = []
+            for match in matches:
+                # Normalize path separators for consistency
+                normalized_match = match.replace('\\', '/')
+                if os.path.isdir(normalized_match):
+                    suggestions.append(normalized_match + '/')
+                else:
+                    suggestions.append(normalized_match)
+            return suggestions
+        except (OSError, PermissionError):
+            return []
 
     def _get_chat_files(self) -> List[str]:
         """Gets all chat files from the chat directory, sorted by time descending."""
@@ -44,52 +62,63 @@ class Completer:
         except OSError:
             return []
 
+    def _get_current_word_prefix(self, text: str) -> (str, int):
+        """Finds the word prefix to be completed and its start index."""
+        word_start_index = 0
+        for i in range(len(text) - 1, -1, -1):
+            if text[i] in self.WORD_DELIMITERS:
+                word_start_index = i + 1
+                break
+        return text[word_start_index:], word_start_index
+
     def find_suggestions(self, line: List[str]):
         """
         Generate suggestions based on the word before the cursor.
-        The "word" is defined as everything after the last whitespace or delimiter.
         """
         current_text = "".join(line)
-        delimiters = " `~!@#$%^&*()=+[{]}\\|;:'\",<>/?"
-        word_start_index = 0
-        for i in range(len(current_text) - 1, -1, -1):
-            if current_text[i] in delimiters:
-                word_start_index = i + 1
-                break
-
-        prefix = current_text[word_start_index:]
+        prefix, _ = self._get_current_word_prefix(current_text)
 
         # Handle "o " command for chat file completion
         if current_text.startswith("o "):
             chat_files = self._get_chat_files()
-            if not prefix:  # Show all chat files when no prefix is provided
+            # The prefix for 'o' command is the part after 'o '
+            command_prefix = current_text[len("o "):]
+            if not command_prefix:
                 self.suggestions = sorted(chat_files, reverse=True)
             else:
                 self.suggestions = sorted(
                     [
                         chat_file
                         for chat_file in chat_files
-                        if chat_file.lower().startswith(prefix.lower())
-                    ],
-                    reverse=True
+                        if chat_file.lower().startswith(command_prefix.lower())
+                    ]
                 )
         else:
             if not prefix:
                 self.reset()
                 return
 
-            history_words = self._get_words_from_history()
-            fs_words = self._get_words_from_filesystem()
-            all_words = history_words.union(fs_words)
-
-            self.suggestions = sorted(
-                [
+            fs_suggestions = self._get_filesystem_suggestions(prefix)
+            
+            # Only add history words if we are not in the middle of a path
+            if os.path.sep not in prefix:
+                history_words = self._get_words_from_history()
+                history_suggestions = {
                     word
-                    for word in all_words
+                    for word in history_words
                     if word.lower().startswith(prefix.lower())
-                    and word.lower() != prefix.lower()
-                ]
-            )
+                }
+                # Combine, deduplicate, and sort
+                all_suggestions = sorted(list(history_suggestions.union(set(fs_suggestions))))
+            else:
+                all_suggestions = sorted(fs_suggestions)
+
+            # Filter out the exact prefix if it's the only suggestion
+            if len(all_suggestions) == 1 and all_suggestions[0].lower() == prefix.lower():
+                 self.suggestions = []
+            else:
+                 self.suggestions = all_suggestions
+
 
         if self.suggestions:
             self.active = True
@@ -116,15 +145,7 @@ class Completer:
     def apply_suggestion(self, current_line: List[str], suggestion: str) -> List[str]:
         """Replaces the current word with the chosen suggestion."""
         current_text = "".join(current_line)
-        delimiters = " \t\n`~!@#$%^&*()=+[{]}\\|;:'\",<>/?"
-        word_start_index = 0
-        for i in range(len(current_text) - 1, -1, -1):
-            if current_text[i] in delimiters:
-                word_start_index = i + 1
-                break
-
-        if os.path.isdir(suggestion):
-            suggestion += "/"
+        _, word_start_index = self._get_current_word_prefix(current_text)
 
         new_line = list(current_text[:word_start_index])
         new_line.extend(list(suggestion))
