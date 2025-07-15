@@ -421,6 +421,9 @@ class ChatClient:
 
         while True:
             try:
+                mistral_model = "mistral" in os.environ.get("LOCAL_OPENAI_API_MODEL", "").lower()
+                should_stream   = not mistral_model          # disable streaming for Mistral
+                should_stream = True
                 response = requests.post(
                     f"{self.base_url}/v1/chat/completions",
                     headers=self.headers,
@@ -429,7 +432,7 @@ class ChatClient:
                         "messages": self.messages,
                         "tools": self.tools,
                         "tool_choice": "auto",
-                        "stream": True,
+                        "stream": should_stream,
                     },
                     timeout=120,
                     stream=True,
