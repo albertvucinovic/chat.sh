@@ -94,7 +94,7 @@ class Completer:
         The "word" is defined as everything after the last whitespace or delimiter.
         """
         current_text = "".join(line)
-        delimiters = " \t\n`~!@#$%^&*()=+[{]}\\|;:'\",<>/?"
+        delimiters = " `~!@#$%^&*()=+[{]}\|;:'\",<>/?"
         word_start_index = 0
         for i in range(len(current_text) - 1, -1, -1):
             if current_text[i] in delimiters:
@@ -103,21 +103,25 @@ class Completer:
 
         prefix = current_text[word_start_index:]
 
-        if not prefix:
-            self.reset()
-            return
-
         # Handle "o " command for chat file completion
         if current_text.startswith("o "):
             chat_files = self._get_chat_files()
-            self.suggestions = sorted(
-                [
-                    chat_file
-                    for chat_file in chat_files
-                    if chat_file.lower().startswith(prefix.lower())
-                ]
-            )
+            if not prefix:  # Show all chat files when no prefix is provided
+                self.suggestions = sorted(chat_files, reverse=True)
+            else:
+                self.suggestions = sorted(
+                    [
+                        chat_file
+                        for chat_file in chat_files
+                        if chat_file.lower().startswith(prefix.lower())
+                    ],
+                    reverse=True
+                )
         else:
+            if not prefix:
+                self.reset()
+                return
+
             history_words = self._get_words_from_history()
             fs_words = self._get_words_from_filesystem()
             all_words = history_words.union(fs_words)
