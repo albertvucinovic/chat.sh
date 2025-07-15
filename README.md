@@ -85,10 +85,13 @@ The client supports features like tool calling, streaming responses, and local c
 
 ## Tools Available
 
-The client exposes two primary tools to the model:
+The client exposes two primary tools to the model which allow execution of local commands:
 
 - `bash(script: str)`: Execute shell scripts via `/bin/bash`
 - `python(script: str)`: Execute Python snippets in-process
+
+When the assistant generates a tool call, it will be displayed in a code block and you will be prompted for confirmation before execution. Type y to confirm execution, otherwise the tool call will be skipped.
+
 
 ## Usage
 
