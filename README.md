@@ -69,6 +69,15 @@ The client supports features like tool calling, streaming responses, and local c
    export API_MODEL=moonshotai/Kimi-K2-Instruct
    ```
 
+   - Gemini OpenAI compatible api:
+   ```bash
+   #Gemini
+   export API_KEY=<your gemini api key from google ai studio>
+   export API_MODEL=gemini-2.5-flash
+   export API_BASE=https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
+
+   ```
+
 5. **Run the chat client**:
    ```bash
    ./chat.sh
