@@ -1,4 +1,4 @@
-# Agentic Chat Client for Local OpenAI-Compatible Endpoint
+# Local first, hackable, agentic chat for the command line
 
 This project provides a CLI chat client that connects to a OpenAI-compatible endpoint, preferably local but can be remote.
 The client supports features like tool calling, streaming responses, and local command execution, all in well bellow a 1000 lines of code, so it is hackable.
