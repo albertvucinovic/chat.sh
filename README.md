@@ -11,6 +11,7 @@ The client supports features like tool calling, streaming responses, and local c
 - **Environment Management**: Easy setup with virtual environments and dependencies
 - **Interactive Interface**: Tab completion, history-based suggestions, and keyboard shortcuts
 - **Chat Persistence**: Automatic saving of conversation history
+    - Saved in the directory where started, under localChats folder
 - **Context Management**: Ability to load previous chats and maintain context
 
 ## Requirements

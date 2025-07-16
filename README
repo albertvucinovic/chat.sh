@@ -1,4 +1,0 @@
-python3.11 -m venv python3.11-venv
-source python3.11-venv/bin/activate
-pip install -r requirements.txt
-source .env #to get the token
