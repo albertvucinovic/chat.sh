@@ -19,7 +19,6 @@ class PtkCompleter(Completer):
 
     def __init__(self, client: "ChatClient"):
         self.client = client
-        # The regex now correctly uses the WORD_DELIMITERS constant
         self.word_regex = re.compile(r"[^\s" + re.escape(self.WORD_DELIMITERS) + "]+")
 
     def _get_words_from_history(self) -> Set[str]:
@@ -35,7 +34,6 @@ class PtkCompleter(Completer):
     def _get_filesystem_suggestions(self, prefix: str) -> List[str]:
         """Gets suggestions from the filesystem using glob."""
         try:
-            # Expand user tilde for paths like ~/
             expanded_prefix = os.path.expanduser(prefix)
             matches = glob.glob(expanded_prefix + '*')
             suggestions = []
@@ -71,28 +69,25 @@ class PtkCompleter(Completer):
             suggestions = [f for f in chat_files if f.startswith(prefix)]
             for s in suggestions:
                 yield Completion(s, start_position=-len(prefix))
-            return # Exit after handling this special command
+            return
 
         # --- 2. Special command: '/ global' ---
-        elif text_before_cursor.startswith("/ global/"):
+        elif text_before_cursor.startswith("/ global"):
             script_dir = os.path.dirname(__file__)
             global_commands_dir = os.path.join(script_dir, 'global_commands')
             
-            # Determine what part of the command the user has typed after "/ global"
-            # This is the part we will replace with the suggestion.
-            typed_part = text_before_cursor[len('/ global/'):]
+            if text_before_cursor.startswith("/ global/"):
+                typed_part = text_before_cursor[len('/ global/'):]
+            else:
+                typed_part = text_before_cursor[len('/ global'):].lstrip()
 
-            # The full path prefix to search for suggestions
             search_prefix = os.path.join(global_commands_dir, typed_part)
-            
-            # Get suggestions (which are full paths)
             full_path_suggestions = self._get_filesystem_suggestions(search_prefix)
             
-            # Convert full paths back to relative paths for display and insertion
             for full_path in full_path_suggestions:
                 suggestion = os.path.relpath(full_path, global_commands_dir).replace('\\', '/')
                 yield Completion(suggestion, start_position=-len(typed_part))
-            return # Exit after handling this special command
+            return
 
         # --- 3. General Completion Logic (Fallback) ---
         word_before_cursor = document.get_word_before_cursor(pattern=self.word_regex)

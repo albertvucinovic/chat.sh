@@ -4,7 +4,6 @@ from rich.panel import Panel
 from rich.text import Text
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.filters import Condition
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 
 from chat_client import ChatClient
@@ -31,7 +30,7 @@ def main():
     def _(event):
         event.app.exit(result=event.current_buffer.text)
 
-    # Ctrl+C to exit the application gracefully
+    # Ctrl+C to exit the application gracefully WHEN AT THE PROMPT
     @kb.add("c-c")
     def _(event):
         event.app.exit(exception=KeyboardInterrupt)
@@ -48,7 +47,7 @@ def main():
 
     console.print(
         Panel(
-            "Chat started. [bold]Tab[/bold] to autocomplete. [bold]Ctrl+D[/bold] to submit. [bold]Ctrl+C[/bold] to exit.",
+            "Chat started. [bold]Tab[/bold] to autocomplete. [bold]Ctrl+D[/bold] to submit. [bold]Ctrl+C[/bold] to exit or interrupt.",
             title="[bold]Welcome[/bold]",
             border_style="magenta"
         )
@@ -99,7 +98,7 @@ def main():
             client.send_message(user_input)
 
         except KeyboardInterrupt:
-            # Catches Ctrl+C from the prompt or during generation
+            # This catches Ctrl+C FROM THE PROMPT and exits.
             shutdown()
         except EOFError:
             # Catches Ctrl+D on an empty line to exit

@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 from rich.console import Console, Group
-from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.panel import Panel
 from rich.live import Live
@@ -57,7 +56,7 @@ class ChatClient:
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
         }
-        self.console = Console()
+        self.console = Console(force_terminal=True, legacy_windows=False)
 
         self.chat_dir = Path.cwd() / "localChats"
         self.chat_dir.mkdir(parents=True, exist_ok=True)
@@ -133,6 +132,7 @@ class ChatClient:
             assistant_text_parts: list[str] = []
             tool_calls_buf: dict[int, dict] = {}
             interrupted = False
+            data = ""
 
             try:
                 response = requests.post(
@@ -150,36 +150,25 @@ class ChatClient:
                 )
                 response.raise_for_status()
 
-                # --- THE FIX: Manual byte decoding ---
-                # We will manage a buffer to handle lines split across chunks.
                 buffer = ""
                 with Live(console=self.console, auto_refresh=False) as live:
                     live.update(Panel("[dim]Assistant is thinking...[/dim]", border_style="cyan"), refresh=True)
                     
-                    # Iterate over raw byte chunks instead of decoded lines
                     for chunk in response.iter_content(chunk_size=1024):
-                        if not chunk:
-                            continue
-                        
-                        # Decode the byte chunk to UTF-8 and add to our buffer
+                        if not chunk: continue
                         buffer += chunk.decode('utf-8')
                         
-                        # Process all complete lines in the buffer
                         while '\n' in buffer:
                             line, buffer = buffer.split('\n', 1)
-
-                            if not line.strip() or not line.startswith("data: "):
-                                continue
+                            if not line.strip() or not line.startswith("data: "): continue
                             
                             data = line[6:]
-                            if data == "[DONE]":
-                                break
+                            if data == "[DONE]": break
 
                             try:
                                 chunk_json = json.loads(data)
                                 delta = chunk_json.get("choices", [{}])[0].get("delta", {})
-                            except json.JSONDecodeError:
-                                continue # Skip malformed data lines
+                            except json.JSONDecodeError: continue
 
                             if delta.get("content"):
                                 assistant_text_parts.append(delta["content"])
@@ -195,10 +184,9 @@ class ChatClient:
                                         if f_delta.get("name"): tc_full["function"]["name"] = f_delta["name"]
                                         if f_delta.get("arguments"): tc_full["function"]["arguments"] += f_delta["arguments"]
                             
-                            # Update the live display inside the loop
                             renderables = []
                             if assistant_text_parts:
-                                renderables.append(Markdown("".join(assistant_text_parts)))
+                                renderables.append(Text("".join(assistant_text_parts)))
                             for tc_full in sorted(tool_calls_buf.values(), key=lambda x: x.get('index', 0)):
                                 name = tc_full.get("function", {}).get("name", "...")
                                 args = tc_full.get("function", {}).get("arguments", "")
@@ -211,8 +199,7 @@ class ChatClient:
                             
                             live.update(Panel(Group(*renderables), title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"), refresh=True)
                         
-                        if data == "[DONE]":
-                            break
+                        if data == "[DONE]": break
 
             except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
                 if isinstance(e, KeyboardInterrupt):
@@ -221,7 +208,6 @@ class ChatClient:
                     self.console.print(f"\n[bold red]Error: {e}[/bold red]")
                 interrupted = True
             
-            # --- Post-stream processing is the same as before ---
             full_text = "".join(assistant_text_parts).strip()
             
             if not tool_calls_buf and full_text.strip().startswith('{'):
@@ -274,7 +260,6 @@ class ChatClient:
             self.console.print(f"\n[bold red]Error: Failed to send context to LLM: {e}[/bold red]")
             self.messages.pop()
 
-
     def save_chat(self) -> str:
         summary = self.summary if self.summary else "unnamed_chat"
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -301,13 +286,13 @@ class ChatClient:
                 title, style, content_renderable = "", "", None
                 if msg["role"] == "user":
                     title, style = "[bold green]You[/bold green]", "green"
-                    content_renderable = Markdown(msg.get('content', ''))
+                    content_renderable = Text(msg.get('content', ''))
                 elif msg["role"] == "assistant":
                     title, style = "[bold cyan]Assistant[/bold cyan]", "cyan"
                     content = msg.get("content", "")
                     tool_calls = msg.get("tool_calls")
                     renderables = []
-                    if content: renderables.append(Markdown(content))
+                    if content: renderables.append(Text(content))
                     if tool_calls:
                         for tc in tool_calls:
                             fn_name = tc.get("function", {}).get("name", "unknown")
