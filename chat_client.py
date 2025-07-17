@@ -127,6 +127,11 @@ class ChatClient:
             "role": "tool", "name": fn_name, "tool_call_id": call_id, "content": output
         })
 
+# In chat_client.py, replace the existing send_message method with this one.
+# The other methods (__init__, _handle_tool_call, etc.) remain the same.
+
+    # In chat_client.py, replace the existing send_message method with this one.
+
     def send_message(self, message: str):
         self.messages.append({"role": "user", "content": message})
 
@@ -151,44 +156,69 @@ class ChatClient:
                 )
                 response.raise_for_status()
 
+                # --- THE FIX: Manual byte decoding ---
+                # We will manage a buffer to handle lines split across chunks.
+                buffer = ""
                 with Live(console=self.console, auto_refresh=False) as live:
                     live.update(Panel("[dim]Assistant is thinking...[/dim]", border_style="cyan"), refresh=True)
-                    for raw in response.iter_lines(decode_unicode=True):
-                        if not raw or not raw.startswith("data: "): continue
-                        data = raw[6:]
-                        if data == "[DONE]": break
+                    
+                    # Iterate over raw byte chunks instead of decoded lines
+                    for chunk in response.iter_content(chunk_size=1024):
+                        if not chunk:
+                            continue
                         
-                        chunk = json.loads(data)
-                        delta = chunk.get("choices", [{}])[0].get("delta", {})
-
-                        if delta.get("content"):
-                            assistant_text_parts.append(delta["content"])
-
-                        if tool_calls_chunk := delta.get("tool_calls"):
-                            for index, tc_delta in enumerate(tool_calls_chunk):
-                                buffer_index = tc_delta.get("index", index)
-                                if buffer_index not in tool_calls_buf:
-                                    tool_calls_buf[buffer_index] = {"id": f"call_{uuid.uuid4().hex[:10]}", "type": "function", "function": {"name": "", "arguments": ""}}
-                                tc_full = tool_calls_buf[buffer_index]
-                                if tc_delta.get("id"): tc_full["id"] = tc_delta["id"]
-                                if f_delta := tc_delta.get("function"):
-                                    if f_delta.get("name"): tc_full["function"]["name"] = f_delta["name"]
-                                    if f_delta.get("arguments"): tc_full["function"]["arguments"] += f_delta["arguments"]
+                        # Decode the byte chunk to UTF-8 and add to our buffer
+                        buffer += chunk.decode('utf-8')
                         
-                        renderables = []
-                        if assistant_text_parts:
-                            renderables.append(Markdown("".join(assistant_text_parts)))
-                        for tc_full in sorted(tool_calls_buf.values(), key=lambda x: x.get('index', 0)):
-                            name = tc_full.get("function", {}).get("name", "...")
-                            args = tc_full.get("function", {}).get("arguments", "")
+                        # Process all complete lines in the buffer
+                        while '\n' in buffer:
+                            line, buffer = buffer.split('\n', 1)
+
+                            if not line.strip() or not line.startswith("data: "):
+                                continue
+                            
+                            data = line[6:]
+                            if data == "[DONE]":
+                                break
+
                             try:
-                                script = json.loads(args or '{}').get('script', args)
-                                syntax = Syntax(script, name, theme="monokai", line_numbers=True)
-                                renderables.append(Panel(syntax, title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                                chunk_json = json.loads(data)
+                                delta = chunk_json.get("choices", [{}])[0].get("delta", {})
                             except json.JSONDecodeError:
-                                renderables.append(Panel(Text(args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                                continue # Skip malformed data lines
+
+                            if delta.get("content"):
+                                assistant_text_parts.append(delta["content"])
+
+                            if tool_calls_chunk := delta.get("tool_calls"):
+                                for index, tc_delta in enumerate(tool_calls_chunk):
+                                    buffer_index = tc_delta.get("index", index)
+                                    if buffer_index not in tool_calls_buf:
+                                        tool_calls_buf[buffer_index] = {"id": f"call_{uuid.uuid4().hex[:10]}", "type": "function", "function": {"name": "", "arguments": ""}}
+                                    tc_full = tool_calls_buf[buffer_index]
+                                    if tc_delta.get("id"): tc_full["id"] = tc_delta["id"]
+                                    if f_delta := tc_delta.get("function"):
+                                        if f_delta.get("name"): tc_full["function"]["name"] = f_delta["name"]
+                                        if f_delta.get("arguments"): tc_full["function"]["arguments"] += f_delta["arguments"]
+                            
+                            # Update the live display inside the loop
+                            renderables = []
+                            if assistant_text_parts:
+                                renderables.append(Markdown("".join(assistant_text_parts)))
+                            for tc_full in sorted(tool_calls_buf.values(), key=lambda x: x.get('index', 0)):
+                                name = tc_full.get("function", {}).get("name", "...")
+                                args = tc_full.get("function", {}).get("arguments", "")
+                                try:
+                                    script = json.loads(args or '{}').get('script', args)
+                                    syntax = Syntax(script, name, theme="monokai", line_numbers=True)
+                                    renderables.append(Panel(syntax, title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                                except json.JSONDecodeError:
+                                    renderables.append(Panel(Text(args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                            
+                            live.update(Panel(Group(*renderables), title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"), refresh=True)
                         
-                        live.update(Panel(Group(*renderables), title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"), refresh=True)
+                        if data == "[DONE]":
+                            break
 
             except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
                 if isinstance(e, KeyboardInterrupt):
@@ -197,6 +227,7 @@ class ChatClient:
                     self.console.print(f"\n[bold red]Error: {e}[/bold red]")
                 interrupted = True
             
+            # --- Post-stream processing is the same as before ---
             full_text = "".join(assistant_text_parts).strip()
             
             if not tool_calls_buf and full_text.strip().startswith('{'):
