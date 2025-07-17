@@ -22,6 +22,25 @@ def main():
         console.print("Please provide API_KEY, API_MODEL, API_BASE environment variables")
         return
 
+    # --- Dynamic Prompt Setup ---
+    def get_prompt_message():
+        """Returns the prompt string based on border state."""
+        return "[You]: " if client.borders_enabled else "You: "
+
+    def get_continuation_message():
+        """Returns the continuation prompt string based on border state."""
+        return "[...] " if client.borders_enabled else "... "
+
+    # --- Prompt Session Setup ---
+    session = PromptSession(
+        message=get_prompt_message,
+        completer=PtkCompleter(client),
+        auto_suggest=AutoSuggestFromHistory(),
+        multiline=True,
+        # Initialize with the function's *result* (a string), not the function itself.
+        prompt_continuation=get_continuation_message(),
+    )
+
     # --- Key Bindings for prompt-toolkit ---
     kb = KeyBindings()
 
@@ -37,26 +56,10 @@ def main():
     def _(event):
         """Toggles UI borders and prints a status message above the prompt."""
         message = client.toggle_borders()
-        #event.app.print_text(f"\n{message}")
+        session.prompt_continuation = get_continuation_message()
 
-    # --- Dynamic Prompt Setup ---
-    def get_prompt_message():
-        """Returns the prompt string based on border state."""
-        return "[You]: " if client.borders_enabled else "You: "
-
-    def get_continuation_message():
-        """Returns the continuation prompt string based on border state."""
-        return "[...] " if client.borders_enabled else "... "
-
-    # --- Prompt Session Setup ---
-    session = PromptSession(
-        message=get_prompt_message,
-        completer=PtkCompleter(client),
-        auto_suggest=AutoSuggestFromHistory(),
-        key_bindings=kb,
-        multiline=True,
-        prompt_continuation=get_continuation_message,
-    )
+    # Assign the key bindings to the session *after* they are defined.
+    session.key_bindings = kb
 
     console.print(
         Panel(

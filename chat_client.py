@@ -62,6 +62,7 @@ class ChatClient:
         self.chat_dir = Path.cwd() / "localChats"
         self.chat_dir.mkdir(parents=True, exist_ok=True)
 
+        script_dir = ''
         try:
             script_dir = Path(__file__).resolve().parent
             system_prompt_path = script_dir / "systemPrompt"
@@ -72,7 +73,18 @@ class ChatClient:
             self.console.print("[yellow]Warning: 'systemPrompt' file not found. Using default.[/yellow]")
 
         system_prompt_content += f'\n\nYou are using this model: {os.environ.get("API_MODEL")}'
-        system_prompt_content += f'\nglobal folder: {Path(__file__).resolve().parent / "global_commands"}'
+        system_prompt_content += f'\nglobal folder: {Path(__file__).resolve().parent / "global_commands"} \n\n'
+
+        try:
+            with open( "AI.md", encoding = "utf-8") as f:
+                aimd_content = f.read()
+        except FileNotFoundError:
+            aimd_content = ''
+            self.console.print("[yellow]Warning: 'AI.md' file not found.")
+        if aimd_content != '':
+            system_prompt_content += "THIS PROJECT'S INSTRUCTIONS AND RULES:\n\n"
+            system_prompt_content += aimd_content
+
         
         self.console.print(Panel(
             system_prompt_content,
