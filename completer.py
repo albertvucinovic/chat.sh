@@ -93,6 +93,14 @@ class Completer:
                         if chat_file.startswith(command_prefix)
                     ]
                 )
+        # Handle "/ global" command for global command completion
+        elif current_text.startswith("/ global"):
+            global_commands_dir = os.path.join(os.path.dirname(__file__), 'global_commands')
+            command_prefix = current_text[len('/ global'):]
+            if current_text.startswith("/ global/"):
+                command_prefix = current_text[len('/ global/'):]
+
+            self.suggestions = self._get_filesystem_suggestions(global_commands_dir + "/" + command_prefix)
         else:
             if not prefix:
                 self.reset()
