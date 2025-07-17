@@ -57,8 +57,7 @@ class ChatClient:
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
         }
-        # This line now works because of the import at the top of the file
-        self.console = Console(force_terminal=True, legacy_windows=False)
+        self.console = Console()
 
         self.chat_dir = Path.cwd() / "localChats"
         self.chat_dir.mkdir(parents=True, exist_ok=True)
@@ -126,11 +125,6 @@ class ChatClient:
         self.messages.append({
             "role": "tool", "name": fn_name, "tool_call_id": call_id, "content": output
         })
-
-# In chat_client.py, replace the existing send_message method with this one.
-# The other methods (__init__, _handle_tool_call, etc.) remain the same.
-
-    # In chat_client.py, replace the existing send_message method with this one.
 
     def send_message(self, message: str):
         self.messages.append({"role": "user", "content": message})
@@ -279,6 +273,7 @@ class ChatClient:
         except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
             self.console.print(f"\n[bold red]Error: Failed to send context to LLM: {e}[/bold red]")
             self.messages.pop()
+
 
     def save_chat(self) -> str:
         summary = self.summary if self.summary else "unnamed_chat"
