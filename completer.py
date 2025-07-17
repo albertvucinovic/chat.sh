@@ -62,40 +62,64 @@ class PtkCompleter(Completer):
 
     def get_completions(self, document: Document, complete_event) -> Iterable[Completion]:
         """Generate completions for the current input."""
-        text = document.text_before_cursor
-        
-        # This is the corrected line
+        text_before_cursor = document.text_before_cursor
+
+        # --- 1. Special command: 'o ' (load chat) ---
+        if text_before_cursor.startswith("o "):
+            prefix = text_before_cursor[len("o "):]
+            chat_files = self._get_chat_files()
+            suggestions = [f for f in chat_files if f.startswith(prefix)]
+            for s in suggestions:
+                yield Completion(s, start_position=-len(prefix))
+            return # Exit after handling this special command
+
+        # --- 2. Special command: '/ global' ---
+        elif text_before_cursor.startswith("/ global/"):
+            script_dir = os.path.dirname(__file__)
+            global_commands_dir = os.path.join(script_dir, 'global_commands')
+            
+            # Determine what part of the command the user has typed after "/ global"
+            # This is the part we will replace with the suggestion.
+            typed_part = text_before_cursor[len('/ global/'):]
+
+            # The full path prefix to search for suggestions
+            search_prefix = os.path.join(global_commands_dir, typed_part)
+            
+            # Get suggestions (which are full paths)
+            full_path_suggestions = self._get_filesystem_suggestions(search_prefix)
+            
+            # Convert full paths back to relative paths for display and insertion
+            for full_path in full_path_suggestions:
+                suggestion = os.path.relpath(full_path, global_commands_dir).replace('\\', '/')
+                yield Completion(suggestion, start_position=-len(typed_part))
+            return # Exit after handling this special command
+
+        # --- 3. General Completion Logic (Fallback) ---
         word_before_cursor = document.get_word_before_cursor(pattern=self.word_regex)
 
-        suggestions = []
-
-        # Handle "o " command for chat file completion
-        if text.startswith("o "):
-            command_prefix = text[len("o "):]
-            chat_files = self._get_chat_files()
-            suggestions = [f for f in chat_files if f.startswith(command_prefix)]
-            word_before_cursor = command_prefix
-        else:
-            # Only trigger completion if there's a word to complete or we're at a path separator
-            if not word_before_cursor and not text.endswith(('/', '\\')):
+        if not word_before_cursor:
+            if text_before_cursor.endswith(('/', '\\')):
+                prefix = text_before_cursor
+            else:
                 return
+        else:
+            prefix = word_before_cursor
 
-            fs_suggestions = self._get_filesystem_suggestions(text if text.endswith(('/', '\\')) else word_before_cursor)
-            
-            if os.path.sep not in word_before_cursor:
-                history_words = self._get_words_from_history()
-                history_suggestions = {
-                    word for word in history_words if word.lower().startswith(word_before_cursor.lower())
-                }
-                all_suggestions = sorted(list(history_suggestions.union(set(fs_suggestions))))
-            else:
-                all_suggestions = sorted(fs_suggestions)
+        fs_suggestions = self._get_filesystem_suggestions(prefix)
+        
+        if os.path.sep not in prefix:
+            history_words = self._get_words_from_history()
+            history_suggestions = {
+                word for word in history_words if word.lower().startswith(prefix.lower())
+            }
+            all_suggestions = sorted(list(history_suggestions.union(set(fs_suggestions))))
+        else:
+            all_suggestions = sorted(fs_suggestions)
 
-            if len(all_suggestions) == 1 and all_suggestions[0].lower() == word_before_cursor.lower():
-                 suggestions = []
-            else:
-                 suggestions = all_suggestions
+        if len(all_suggestions) == 1 and all_suggestions[0].lower() == prefix.lower():
+             suggestions = []
+        else:
+             suggestions = all_suggestions
 
-        # Yield Completion objects for prompt-toolkit
         for s in suggestions:
-            yield Completion(s, start_position=-len(word_before_cursor))
+            yield Completion(s, start_position=-len(prefix))
