@@ -24,7 +24,8 @@ The client supports true tool calling, streaming for both text and tool code, an
 ## Requirements
 
 -   Python 3.11+
--   An OpenAI-compatible API endpoint (local or remote)
+-   Virtual environment support
+-   Internet access for installing dependencies
 
 ## Setup Instructions
 
@@ -39,35 +40,81 @@ The client supports true tool calling, streaming for both text and tool code, an
     pip install -r requirements.txt
     ```
 
-3.  **Setup a model endpoint**:
-    This client can connect to any OpenAI-compatible API.
-    -   **Local (Recommended)**: Use tools like `llama-cpp-python`'s server, vLLM, or SGLang. For `llama.cpp`, compile it with `make LLAMA_CURL=1` and run the server:
+3.  **Setup the model**:
+    -   use one provided by some openai api provider and get api key, model, and api base variables that way
+    -   use llama.cpp's llama-server, this works for my dual 24G cards setup, after downloading .gguf file from huggingface, and compiling llama.cpp with `make LLAMA_CURL=1` in llama.cpp source dir got from github
         ```bash
-        ./server -m "path/to/your/model.gguf" --n-gpu-layers 99 --port 10000
+        bin/llama-server \
+          --model ../vllm/Models/mistralai/Devstral-Small-2507-Q8_0.gguf \
+          --threads -1 \
+          --ctx-size 40000 \
+          --cache-type-k q8_0 \
+          --n-gpu-layers 99 \
+          --seed 3407 \
+          --prio 2 \
+          --temp 0.15 \
+          --repeat-penalty 1.0 \
+          --min-p 0.01 \
+          --top-k 64 \
+          --top-p 0.95 \
+          --jinja \
+          --port 10000
         ```
-    -   **Remote**: Use a commercial API provider.
+    -   use vllm, sglang, ...
 
 4.  **Set up environment variables**:
-    Create a `.env` file in the project root. The `chat.sh` script will automatically source it.
+    Create a `.env` file in the root directory of the project. This file will be sourced by `chat.sh`:
 
-    **Local Example:**
-    ```bash
-    export API_BASE="http://localhost:10000/v1"
-    export API_KEY="sk-local" # Can be anything for most local servers
-    export API_MODEL="local-model" # Name used by the local server
-    ```
+    -   local api:
+        ```bash
+        export API_BASE=http://localhost:10000/v1/chat/completions
+        export API_KEY=<your local api key>
+        export API_MODEL='../vllm/Models/mistralai/Devstral-Small-2507-Q8_0.gguf'
+        ```
 
-    **TogetherAI Example:**
-    ```bash
-    export API_BASE="https://api.together.xyz/v1"
-    export API_KEY="<your-togetherai-api-key>"
-    export API_MODEL="mistralai/Mixtral-8x7B-Instruct-v0.1"
-    ```
+    -   TogetherAI:
+        ```bash
+        export API_BASE=https://api.together.xyz/v1/chat/completions
+        export API_KEY=<your togetherai api key>
+        export API_MODEL=moonshotai/Kimi-K2-Instruct
+        ```
+
+    -   Gemini:
+        ```bash
+        #Gemini
+        export API_KEY=<your gemini api key from google ai studio>
+        export API_MODEL=gemini-2.5-flash
+        export API_BASE=https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
+        ```
+
+    -   OpenAI:
+        ```bash
+        export API_BASE=https://api.openai.com/v1/chat/completions
+        export API_KEY=<your openai api key>
+        export API_MODEL=o3-mini
+        ```
+
+    -   Anthropic:
+        ```bash
+        #I guess
+        export API_BASE=https://api.anthropic.com/v1/chat/completions
+        export API_MODEL=claude-opus-4-20250514
+        export API_KEY=<your anthropic key>
+        ```
 
 5.  **Run the chat client**:
     ```bash
     ./chat.sh
     ```
+
+## Tools Available
+
+The client exposes two primary tools to the model which allow execution of local commands:
+
+-   `bash(script: str)`: Execute shell scripts via `/bin/bash`
+-   `python(script: str)`: Execute Python snippets in-process
+
+When the assistant generates a tool call, it will be displayed in a code block and you will be prompted for confirmation before execution. Type `y` to confirm execution, otherwise the tool call will be skipped.
 
 ## Usage
 
@@ -85,12 +132,9 @@ Type your message. Use Enter for new lines. Press `Ctrl+D` when you're done.
 ### Local Command Execution
 
 To bypass the assistant and run a shell command directly, prefix it with `b `:
+
 b ls -la
 
-
-### Model Tool Execution
-
-The assistant can generate `bash` or `python` code blocks. You will be prompted to confirm execution with `y` or `n` before they run.
 
 ### Chat Management
 
