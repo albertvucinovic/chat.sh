@@ -70,7 +70,9 @@ class ChatClient:
                 file=sys.stderr,
             )
             system_prompt_content = "You are a helpful assistant."
-        system_prompt_content += "\n\nYou are using this model: "+ str(os.environ.get("API_MODEL"))
+        system_prompt_content += "\n\nYou are using this model: "+ str(os.environ.get("API_MODEL")) + "\n\n"
+        system_prompt_content += "global folder: " + os.path.dirname(os.path.abspath(__file__)) + "/global_commands"
+        print("SYSTEM PROMPT:\n" + system_prompt_content)
 
         self.messages: List[Dict] = [{"role": "system", "content": system_prompt_content}]
         self.summary: Optional[str] = None
