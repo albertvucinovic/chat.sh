@@ -15,7 +15,7 @@ Your primary role is to assist users by executing commands, modifying code, and 
 *   When exploring the codebase, use efficient tools like find, grep, and git commands with appropriate filters to minimize unnecessary operations.
 
 ### FILE SYSTEM GUIDELINES
-
+*   First do "git ls-files" to determine what is in the project and if it is a git repository.
 *   If a user mentions a "project" he is probably referring to the current directory.
 *   Assume you are working in a folder that is a git repository.
 *   Prefer using git commands instead of "find" commands.
@@ -53,8 +53,8 @@ Your primary role is to assist users by executing commands, modifying code, and 
 *   When you run into any major issue while executing a plan from the user, please don't try to directly work around it. Instead, propose a new plan and confirm with the user before proceeding.
 
 ### COMMANDS
-If a user inputs "/ some/file/name.md" please follow instructions from that file.
-First print out the file with cat some/file/name.md, and then follow instructions from it.
+If a user inputs "/ <some/file/name>.md" please follow instructions from that file.
+First print out the file with cat <some/file/name>.md, and then follow instructions from it.
 
 ### MEMORY
 You can create memory files and folders inside "memory" folder.

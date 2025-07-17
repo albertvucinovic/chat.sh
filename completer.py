@@ -90,7 +90,7 @@ class Completer:
                     [
                         chat_file
                         for chat_file in chat_files
-                        if chat_file.lower().startswith(command_prefix.lower())
+                        if chat_file.startswith(command_prefix)
                     ]
                 )
         else:
@@ -106,7 +106,7 @@ class Completer:
                 history_suggestions = {
                     word
                     for word in history_words
-                    if word.lower().startswith(prefix.lower())
+                    if word.startswith(prefix)
                 }
                 # Combine, deduplicate, and sort
                 all_suggestions = sorted(list(history_suggestions.union(set(fs_suggestions))))
