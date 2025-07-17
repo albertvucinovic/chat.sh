@@ -1,55 +1,81 @@
-import signal
 import sys
-import termios
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+from prompt_toolkit import PromptSession
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.filters import Condition
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+
 from chat_client import ChatClient
-from input_handler import get_multiline_input
+from completer import PtkCompleter
 from executors import run_bash_script
 
 def main():
+    """
+    Main function to run the chat application.
+    """
+    console = Console()
     try:
         client = ChatClient()
     except ValueError as e:
-        print(f"Error: {e}")
-        print("Please provide API_KEY, API_MODEL, API_BASE environment variables")
+        console.print(f"[bold red]Error: {e}[/bold red]")
+        console.print("Please provide API_KEY, API_MODEL, API_BASE environment variables")
         return
 
-    print(
-        "Chat started. Press Tab to autocomplete. Press Ctrl+I to interrupt generation.\n"
-        "Press Ctrl+D to submit. Press Ctrl+C to exit and save. Press Ctrl+E to clear input."
+    # --- Key Bindings for prompt-toolkit ---
+    kb = KeyBindings()
+
+    # Ctrl+D to submit multiline input
+    @kb.add("c-d")
+    def _(event):
+        event.app.exit(result=event.current_buffer.text)
+
+    # Ctrl+C to exit the application gracefully
+    @kb.add("c-c")
+    def _(event):
+        event.app.exit(exception=KeyboardInterrupt)
+
+    # --- Prompt Session Setup ---
+    session = PromptSession(
+        "You: ",
+        completer=PtkCompleter(client),
+        auto_suggest=AutoSuggestFromHistory(),
+        key_bindings=kb,
+        multiline=True,
+        prompt_continuation="... ",
     )
 
-    # --- GLOBAL CTRL+C HANDLER ---
-    # This handler ensures that Ctrl+C always triggers a clean exit.
-    def signal_handler(sig, frame):
-        print("\n\nSaving chat and exiting...")
-        # Attempt to restore terminal settings as a failsafe
-        try:
-            fd = sys.stdin.fileno()
-            original_settings = termios.tcgetattr(fd)
-            termios.tcsetattr(fd, termios.TCSADRAIN, original_settings)
-        except Exception:
-            pass # Ignore if it fails (e.g., not a TTY)
+    console.print(
+        Panel(
+            "Chat started. [bold]Tab[/bold] to autocomplete. [bold]Ctrl+D[/bold] to submit. [bold]Ctrl+C[/bold] to exit.",
+            title="[bold]Welcome[/bold]",
+            border_style="magenta"
+        )
+    )
+
+    def shutdown():
+        """Saves the chat and exits cleanly."""
+        console.print("\n\n[bold yellow]Saving chat and exiting...[/bold yellow]")
         saved_path = client.save_chat()
-        print(f"Chat saved to: {saved_path}")
+        console.print(f"[green]Chat saved to:[/green] {saved_path}")
         sys.exit(0)
 
-    signal.signal(signal.SIGINT, signal_handler)
-
-    try:
-        while True:
-            # get_multiline_input now handles its own terminal state and Ctrl+C while typing.
-            user_input = get_multiline_input(client).strip()
+    # --- Main Application Loop ---
+    while True:
+        try:
+            user_input = session.prompt().strip()
 
             if not user_input:
                 continue
 
-            # Local one-off bash command (prefix "b ")
+            # Handle local one-off bash command (prefix "b ")
             if user_input.startswith("b "):
-                print("\nExecuting local command...")
+                console.print("\n[cyan]Executing local command...[/cyan]")
                 script_to_run = user_input[2:].strip()
                 if script_to_run:
                     output = run_bash_script(script_to_run)
-                    print(output)
+                    console.print(Panel(Text(output), title="[bold green]Local Command Output[/bold green]", border_style="green"))
                     context_message = (
                         "User executed a local command.\n"
                         f"Command:\n```bash\n{script_to_run}\n```\n\n"
@@ -57,22 +83,27 @@ def main():
                     )
                     client.send_context_only(context_message)
                 else:
-                    print("Empty bash command, skipping.")
+                    console.print("[yellow]Empty bash command, skipping.[/yellow]")
                 continue
 
-            # Load chat command (prefix "o ")
+            # Handle load chat command (prefix "o ")
             elif user_input.startswith("o "):
                 chat_name = user_input[2:].strip()
                 if chat_name:
                     client.load_chat(chat_name)
                 else:
-                    print("No chat file specified.")
+                    console.print("[yellow]No chat file specified.[/yellow]")
                 continue
 
+            # Send message to the chat client for processing
             client.send_message(user_input)
-    except EOFError:
-        # This handles Ctrl+D to exit
-        signal_handler(None, None)
+
+        except KeyboardInterrupt:
+            # Catches Ctrl+C from the prompt or during generation
+            shutdown()
+        except EOFError:
+            # Catches Ctrl+D on an empty line to exit
+            shutdown()
 
 if __name__ == "__main__":
     main()
