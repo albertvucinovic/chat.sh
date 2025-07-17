@@ -33,20 +33,29 @@ def main():
     def _(event):
         event.app.exit(exception=KeyboardInterrupt)
 
-    # Ctrl+B to toggle borders and line numbers
     @kb.add("c-b")
     def _(event):
-        """Toggles UI borders and line numbers."""
-        client.toggle_borders()
+        """Toggles UI borders and prints a status message above the prompt."""
+        message = client.toggle_borders()
+        #event.app.print_text(f"\n{message}")
+
+    # --- Dynamic Prompt Setup ---
+    def get_prompt_message():
+        """Returns the prompt string based on border state."""
+        return "[You]: " if client.borders_enabled else "You: "
+
+    def get_continuation_message():
+        """Returns the continuation prompt string based on border state."""
+        return "[...] " if client.borders_enabled else "... "
 
     # --- Prompt Session Setup ---
     session = PromptSession(
-        "You: ",
+        message=get_prompt_message,
         completer=PtkCompleter(client),
         auto_suggest=AutoSuggestFromHistory(),
         key_bindings=kb,
         multiline=True,
-        prompt_continuation="... ",
+        prompt_continuation=get_continuation_message,
     )
 
     console.print(
@@ -79,7 +88,6 @@ def main():
                 if script_to_run:
                     output = run_bash_script(script_to_run)
                     output_renderable = Text(output)
-                    # Conditionally wrap in a Panel
                     if client.borders_enabled:
                         console.print(Panel(output_renderable, title="[bold green]Local Command Output[/bold green]", border_style="green"))
                     else:

@@ -84,10 +84,11 @@ class ChatClient:
         self.summary: Optional[str] = None
         self.tools = TOOLS
 
-    def toggle_borders(self):
+    def toggle_borders(self) -> str:
+        """Toggles the display of borders and returns a status message."""
         self.borders_enabled = not self.borders_enabled
         status = "ON" if self.borders_enabled else "OFF"
-        self.console.print(f"\n[bold yellow]Borders & Line Numbers are now {status}[/bold yellow]")
+        return f"Borders & Line Numbers are now {status}"
 
     def get_border_style(self, style: str) -> str:
         return style if self.borders_enabled else "none"
