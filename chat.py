@@ -25,15 +25,19 @@ def main():
     # --- Key Bindings for prompt-toolkit ---
     kb = KeyBindings()
 
-    # Ctrl+D to submit multiline input
     @kb.add("c-d")
     def _(event):
         event.app.exit(result=event.current_buffer.text)
 
-    # Ctrl+C to exit the application gracefully WHEN AT THE PROMPT
     @kb.add("c-c")
     def _(event):
         event.app.exit(exception=KeyboardInterrupt)
+
+    # Ctrl+B to toggle borders and line numbers
+    @kb.add("c-b")
+    def _(event):
+        """Toggles UI borders and line numbers."""
+        client.toggle_borders()
 
     # --- Prompt Session Setup ---
     session = PromptSession(
@@ -47,9 +51,10 @@ def main():
 
     console.print(
         Panel(
-            "Chat started. [bold]Tab[/bold] to autocomplete. [bold]Ctrl+D[/bold] to submit. [bold]Ctrl+C[/bold] to exit or interrupt.",
+            "Chat started. [bold]Tab[/bold] to autocomplete. [bold]Ctrl+D[/bold] to submit.\n"
+            "[bold]Ctrl+B[/bold] to toggle borders. [bold]Ctrl+C[/bold] to exit or interrupt.",
             title="[bold]Welcome[/bold]",
-            border_style="magenta"
+            border_style=client.get_border_style("magenta")
         )
     )
 
@@ -68,13 +73,18 @@ def main():
             if not user_input:
                 continue
 
-            # Handle local one-off bash command (prefix "b ")
             if user_input.startswith("b "):
                 console.print("\n[cyan]Executing local command...[/cyan]")
                 script_to_run = user_input[2:].strip()
                 if script_to_run:
                     output = run_bash_script(script_to_run)
-                    console.print(Panel(Text(output), title="[bold green]Local Command Output[/bold green]", border_style="green"))
+                    output_renderable = Text(output)
+                    # Conditionally wrap in a Panel
+                    if client.borders_enabled:
+                        console.print(Panel(output_renderable, title="[bold green]Local Command Output[/bold green]", border_style="green"))
+                    else:
+                        console.print(output_renderable)
+
                     context_message = (
                         "User executed a local command.\n"
                         f"Command:\n```bash\n{script_to_run}\n```\n\n"
@@ -85,7 +95,6 @@ def main():
                     console.print("[yellow]Empty bash command, skipping.[/yellow]")
                 continue
 
-            # Handle load chat command (prefix "o ")
             elif user_input.startswith("o "):
                 chat_name = user_input[2:].strip()
                 if chat_name:
@@ -94,14 +103,11 @@ def main():
                     console.print("[yellow]No chat file specified.[/yellow]")
                 continue
 
-            # Send message to the chat client for processing
             client.send_message(user_input)
 
         except KeyboardInterrupt:
-            # This catches Ctrl+C FROM THE PROMPT and exits.
             shutdown()
         except EOFError:
-            # Catches Ctrl+D on an empty line to exit
             shutdown()
 
 if __name__ == "__main__":

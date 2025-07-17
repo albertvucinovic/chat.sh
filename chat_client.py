@@ -57,6 +57,7 @@ class ChatClient:
             "Content-Type": "application/json",
         }
         self.console = Console(force_terminal=True, legacy_windows=False)
+        self.borders_enabled = True
 
         self.chat_dir = Path.cwd() / "localChats"
         self.chat_dir.mkdir(parents=True, exist_ok=True)
@@ -76,12 +77,20 @@ class ChatClient:
         self.console.print(Panel(
             system_prompt_content,
             title="[bold cyan]System Prompt[/bold cyan]",
-            border_style="dim"
+            border_style=self.get_border_style("dim")
         ))
 
         self.messages: List[Dict] = [{"role": "system", "content": system_prompt_content}]
         self.summary: Optional[str] = None
         self.tools = TOOLS
+
+    def toggle_borders(self):
+        self.borders_enabled = not self.borders_enabled
+        status = "ON" if self.borders_enabled else "OFF"
+        self.console.print(f"\n[bold yellow]Borders & Line Numbers are now {status}[/bold yellow]")
+
+    def get_border_style(self, style: str) -> str:
+        return style if self.borders_enabled else "none"
 
     def extract_summary(self, text):
         start_tag, end_tag = "<summary>", "</summary>"
@@ -104,9 +113,11 @@ class ChatClient:
 
         call_id = call["id"]
         
-        syntax = Syntax(script, fn_name, theme="monokai", line_numbers=True)
-        panel = Panel(syntax, title=f"[bold yellow]Tool Call: {fn_name}[/bold yellow]", border_style="yellow")
-        self.console.print(panel)
+        syntax = Syntax(script, fn_name, theme="monokai", line_numbers=self.borders_enabled)
+        if self.borders_enabled:
+            self.console.print(Panel(syntax, title=f"[bold yellow]Tool Call: {fn_name}[/bold yellow]", border_style="yellow"))
+        else:
+            self.console.print(syntax)
 
         try:
             execute = confirm(f"Execute the above '{fn_name}' tool call?")
@@ -119,7 +130,11 @@ class ChatClient:
         else:
             self.console.print("[cyan]Executing...[/cyan]")
             output = run_bash_script(script) if fn_name == "bash" else run_python_script(script)
-            self.console.print(Panel(Text(output), title="[bold green]Execution Output[/bold green]", border_style="green"))
+            output_renderable = Text(output)
+            if self.borders_enabled:
+                self.console.print(Panel(output_renderable, title="[bold green]Execution Output[/bold green]", border_style="green"))
+            else:
+                self.console.print(output_renderable)
 
         self.messages.append({
             "role": "tool", "name": fn_name, "tool_call_id": call_id, "content": output
@@ -136,23 +151,16 @@ class ChatClient:
 
             try:
                 response = requests.post(
-                    f"{self.base_url}",
-                    headers=self.headers,
-                    json={
-                        "model": os.environ.get("API_MODEL"),
-                        "messages": self.messages,
-                        "tools": self.tools,
-                        "tool_choice": "auto",
-                        "stream": True,
-                    },
-                    timeout=120,
-                    stream=True,
+                    f"{self.base_url}", headers=self.headers,
+                    json={"model": os.environ.get("API_MODEL"), "messages": self.messages, "tools": self.tools, "tool_choice": "auto", "stream": True},
+                    timeout=120, stream=True,
                 )
                 response.raise_for_status()
 
                 buffer = ""
                 with Live(console=self.console, auto_refresh=False) as live:
-                    live.update(Panel("[dim]Assistant is thinking...[/dim]", border_style="cyan"), refresh=True)
+                    if self.borders_enabled:
+                        live.update(Panel("[dim]Assistant is thinking...[/dim]", border_style="cyan"), refresh=True)
                     
                     for chunk in response.iter_content(chunk_size=1024):
                         if not chunk: continue
@@ -192,20 +200,28 @@ class ChatClient:
                                 args = tc_full.get("function", {}).get("arguments", "")
                                 try:
                                     script = json.loads(args or '{}').get('script', args)
-                                    syntax = Syntax(script, name, theme="monokai", line_numbers=True)
-                                    renderables.append(Panel(syntax, title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                                    syntax = Syntax(script, name, theme="monokai", line_numbers=self.borders_enabled)
+                                    if self.borders_enabled:
+                                        renderables.append(Panel(syntax, title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                                    else:
+                                        renderables.append(syntax)
                                 except json.JSONDecodeError:
-                                    renderables.append(Panel(Text(args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                                    if self.borders_enabled:
+                                        renderables.append(Panel(Text(args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                                    else:
+                                        renderables.append(Text(args))
                             
-                            live.update(Panel(Group(*renderables), title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"), refresh=True)
+                            final_renderable = Group(*renderables)
+                            if self.borders_enabled:
+                                live.update(Panel(final_renderable, title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"), refresh=True)
+                            else:
+                                live.update(final_renderable, refresh=True)
                         
                         if data == "[DONE]": break
 
             except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
-                if isinstance(e, KeyboardInterrupt):
-                    self.console.print("\n[bold yellow]Generation interrupted by user.[/bold yellow]")
-                else:
-                    self.console.print(f"\n[bold red]Error: {e}[/bold red]")
+                if isinstance(e, KeyboardInterrupt): self.console.print("\n[bold yellow]Generation interrupted by user.[/bold yellow]")
+                else: self.console.print(f"\n[bold red]Error: {e}[/bold red]")
                 interrupted = True
             
             full_text = "".join(assistant_text_parts).strip()
@@ -216,18 +232,10 @@ class ChatClient:
                     if isinstance(potential_tool_json, dict) and "tool_calls" in potential_tool_json:
                         parsed_tool_calls = potential_tool_json["tool_calls"]
                         for i, malformed_tc in enumerate(parsed_tool_calls):
-                            standard_tc = {
-                                "id": malformed_tc.get("id", f"call_{uuid.uuid4().hex[:10]}"),
-                                "type": "function",
-                                "function": {
-                                    "name": malformed_tc.get("name", "unknown_tool"),
-                                    "arguments": json.dumps(malformed_tc.get("arguments", {}))
-                                }
-                            }
+                            standard_tc = {"id": malformed_tc.get("id", f"call_{uuid.uuid4().hex[:10]}"), "type": "function", "function": {"name": malformed_tc.get("name", "unknown_tool"), "arguments": json.dumps(malformed_tc.get("arguments", {}))}}
                             tool_calls_buf[i] = standard_tc
                         full_text = ""
-                except json.JSONDecodeError:
-                    pass
+                except json.JSONDecodeError: pass
 
             assistant_msg: dict = {"role": "assistant"}
             if full_text:
@@ -251,8 +259,7 @@ class ChatClient:
         self.messages.append({"role": "user", "content": message})
         try:
             requests.post(
-                f"{self.base_url}",
-                headers=self.headers,
+                f"{self.base_url}", headers=self.headers,
                 json={"model": os.environ.get("API_MODEL"), "messages": self.messages, "stream": False, "max_tokens": 1},
                 timeout=120,
             ).raise_for_status()
@@ -278,17 +285,23 @@ class ChatClient:
         if chat_file.exists():
             with open(chat_file, "r") as f:
                 self.messages = json.load(f)
-            self.console.print(Panel(f"Loaded chat: {chat_name}", style="green"))
-            self.console.print(Panel("--- Previous conversation ---", style="dim"))
+            
+            if self.borders_enabled:
+                self.console.print(Panel(f"Loaded chat: {chat_name}", border_style="green"))
+                self.console.print(Panel("--- Previous conversation ---", border_style="dim"))
+            else:
+                self.console.print(f"Loaded chat: {chat_name}")
+                self.console.print("--- Previous conversation ---")
+
             for msg in self.messages:
                 if msg["role"] == "system": continue
                 
-                title, style, content_renderable = "", "", None
+                title_text, style, content_renderable = "", "", None
                 if msg["role"] == "user":
-                    title, style = "[bold green]You[/bold green]", "green"
+                    title_text, style = "[bold green]You[/bold green]", "green"
                     content_renderable = Text(msg.get('content', ''))
                 elif msg["role"] == "assistant":
-                    title, style = "[bold cyan]Assistant[/bold cyan]", "cyan"
+                    title_text, style = "[bold cyan]Assistant[/bold cyan]", "cyan"
                     content = msg.get("content", "")
                     tool_calls = msg.get("tool_calls")
                     renderables = []
@@ -299,14 +312,28 @@ class ChatClient:
                             args_str = tc.get("function", {}).get("arguments", "{}")
                             try:
                                 script = json.loads(args_str).get('script', '')
-                                syntax = Syntax(script, fn_name, theme="monokai", line_numbers=True)
-                                renderables.append(Panel(syntax, title=f"[bold yellow]Tool Call: {fn_name}[/bold yellow]", border_style="yellow"))
+                                syntax = Syntax(script, fn_name, theme="monokai", line_numbers=self.borders_enabled)
+                                if self.borders_enabled:
+                                    renderables.append(Panel(syntax, title=f"[bold yellow]Tool Call: {fn_name}[/bold yellow]", border_style="yellow"))
+                                else:
+                                    renderables.append(syntax)
                             except:
-                                renderables.append(Text(f"Tool Call: {fn_name}\n{args_str}"))
+                                text = Text(f"Tool Call: {fn_name}\n{args_str}")
+                                if self.borders_enabled:
+                                    renderables.append(Panel(text))
+                                else:
+                                    renderables.append(text)
                     content_renderable = Group(*renderables)
 
                 if content_renderable:
-                    self.console.print(Panel(content_renderable, title=title, border_style=style))
-            self.console.print(Panel("--- End of previous conversation ---", style="dim"))
+                    if self.borders_enabled:
+                        self.console.print(Panel(content_renderable, title=title_text, border_style=style))
+                    else:
+                        self.console.print(content_renderable)
+
+            if self.borders_enabled:
+                self.console.print(Panel("--- End of previous conversation ---", border_style="dim"))
+            else:
+                self.console.print("--- End of previous conversation ---")
         else:
             self.console.print(f"[bold red]Chat file not found:[/bold red] {chat_name}")
