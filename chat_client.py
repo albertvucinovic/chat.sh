@@ -304,11 +304,37 @@ class ChatClient:
             # First, try direct JSON parsing
             parsed = json.loads(message_content.strip())
             if isinstance(parsed, dict) and 'tool_calls' in parsed:
-                return parsed['tool_calls']
+                # Ensure arguments are JSON strings
+                return [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": tc["function"]["name"],
+                            "arguments": json.dumps(tc["function"].get("arguments", {}))
+                        }
+                    }
+                    for tc in parsed['tool_calls']
+                ]
             elif isinstance(parsed, list):
-                return parsed
+                # Ensure arguments are JSON strings
+                return [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": tc["function"]["name"],
+                            "arguments": json.dumps(tc["function"].get("arguments", {}))
+                        }
+                    }
+                    for tc in parsed
+                ]
             elif isinstance(parsed, dict) and 'type' in parsed and parsed['type'] == 'function':
-                return [parsed]
+                return [{
+                    "type": "function",
+                    "function": {
+                        "name": parsed["function"]["name"],
+                        "arguments": json.dumps(parsed["function"].get("arguments", {}))
+                    }
+                }]
         except json.JSONDecodeError:
             pass
         
@@ -320,9 +346,23 @@ class ChatClient:
             try:
                 parsed = json.loads(match)
                 if isinstance(parsed, dict) and 'tool_calls' in parsed:
-                    tool_calls.extend(parsed['tool_calls'])
+                    # Ensure arguments are JSON strings
+                    for tc in parsed['tool_calls']:
+                        tool_calls.append({
+                            "type": "function",
+                            "function": {
+                                "name": tc["function"]["name"],
+                                "arguments": json.dumps(tc["function"].get("arguments", {}))
+                            }
+                        })
                 elif isinstance(parsed, dict) and 'type' in parsed and parsed['type'] == 'function':
-                    tool_calls.append(parsed)
+                    tool_calls.append({
+                        "type": "function",
+                        "function": {
+                            "name": parsed["function"]["name"],
+                            "arguments": json.dumps(parsed["function"].get("arguments", {}))
+                        }
+                    })
             except json.JSONDecodeError:
                 continue
         
@@ -483,11 +523,29 @@ class ChatClient:
     def _handle_tool_call(self, call: Dict):
         fn_name = call["function"]["name"]
         try:
-            args = json.loads(call["function"].get("arguments", "{}") or "{}")
+            args_raw = call["function"].get("arguments", "{}")
+            
+            # Handle arguments that could be a JSON string or already a dictionary
+            if isinstance(args_raw, str):
+                args = json.loads(args_raw or "{}")
+            else:
+                args = args_raw or {}
         except json.JSONDecodeError:
             self.messages.append({"role": "tool", "name": fn_name,
                                  "tool_call_id": call["id"], "content": "Error: Invalid arguments."})
             return
+        
+        # Display the tool call consistently before execution
+        self.console.print(Panel(
+            Syntax(
+                json.dumps(args, indent=2) if args else "{}", 
+                "json", 
+                theme="monokai", 
+                line_numbers=self.borders_enabled
+            ), 
+            title=f"[bold yellow]Tool Call: {fn_name}[/bold yellow]", 
+            border_style="yellow"
+        ))
         
         try:
             execute = confirm(f"Execute the {fn_name} tool call shown above?")
