@@ -69,6 +69,7 @@ class ChatClient:
         self.context_stack = []  # Stack to store saved chat filenames
         self.original_system_prompt = ""  # Store the original system prompt
         self.boxStyle = box.ROUNDED
+        self.yesTooolFlag = False
 
         parent = Path(__file__).resolve().parent 
 
@@ -603,7 +604,10 @@ class ChatClient:
             ))
         
         try:
-            execute = confirm(f"Execute the {fn_name} tool call shown above?")
+            if self.yesTooolFlag:
+                execute = True
+            else:
+                execute = confirm(f"Execute the {fn_name} tool call shown above?")
         except (EOFError, KeyboardInterrupt):
             execute = False
         if not execute:

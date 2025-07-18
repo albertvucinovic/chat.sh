@@ -195,6 +195,14 @@ def main():
                     console.print("[yellow]Usage: /popContext <return_value>[/yellow]")
                 continue
 
+            elif user_input.startswith("/toggleYesToolFlag"):
+                client.yesTooolFlag = not client.yesTooolFlag
+                if client.yesTooolFlag:
+                    print("TOOL CALLS WILL AUTOMATICALLY GO THROUGH")
+                else:
+                    print("Tool calls need confirmation")
+                continue
+
             client.send_message(user_input)
 
         except KeyboardInterrupt:
