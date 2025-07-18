@@ -121,11 +121,8 @@ def main():
                 if script_to_run:
                     output = run_bash_script(script_to_run)
                     output_renderable = Text(output)
-                    if client.borders_enabled:
-                        console.print(Panel(
-                            output_renderable, title="[bold green]Local Command Output[/bold green]", border_style="green"))
-                    else:
-                        console.print(output_renderable)
+                    console.print(Panel(
+                        output_renderable, title="[bold green]Local Command Output[/bold green]", border_style="green", box = client.boxStyle))
                     context_message = (
                         "User executed a local command.\n"
                         f"Command:\n\`\`\`bash\n{script_to_run}\n\`\`\`\n\n"
@@ -160,7 +157,7 @@ def main():
                     with open(file_path, 'r') as f:
                         command_content = f.read()
                     console.print(Panel(
-                        f"Executing global command: [bold]{command_file}[/bold]", border_style="yellow"))
+                        f"Executing global command: [bold]{command_file}[/bold]", border_style="yellow", box = client.boxStyle))
                     client.send_message(command_content)
                 except FileNotFoundError:
                     console.print(
@@ -182,7 +179,7 @@ def main():
                 if context:
                     result = client.push_context(context)
                     console.print(Panel(
-                        result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan"))
+                        result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan", box = client.boxStyle))
                 else:
                     console.print("[yellow]Usage: /pushContext <new_context>[/yellow]")
                 continue
@@ -193,7 +190,7 @@ def main():
                 if return_value:
                     result = client.pop_context(return_value)
                     console.print(Panel(
-                        result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan"))
+                        result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan", box = client.boxStyle))
                 else:
                     console.print("[yellow]Usage: /popContext <return_value>[/yellow]")
                 continue
