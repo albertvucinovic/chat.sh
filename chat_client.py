@@ -224,7 +224,7 @@ class ChatClient:
                           "messages": self.messages, "stream": False, "max_tokens": 1}, timeout=30).raise_for_status()
         except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
             self.console.print(
-                f"\n[bold red]Error sending context: {e}[/bold red]")
+                f"\n[bold red]Error: Failed to send context to LLM: {e}[/bold red]")
             self.messages.pop()
 
     def _handle_tool_call(self, call: Dict):
@@ -269,35 +269,76 @@ class ChatClient:
         return str(file_path)
 
     def load_chat(self, chat_name: str):
-        file_path = self.chat_dir / chat_name
-        if not file_path.suffix == ".json":
-            file_path = file_path.with_suffix(".json")
-
-        if not file_path.exists():
-            self.console.print(f"[bold red]Error: Chat file not found: {file_path}[/bold red]")
-            return
-
+        """
+        Loads a previous chat from the localChats directory.
+        Re-renders all tool calls with proper formatting.
+        """
+        self.console.print(f"Loading chat: {chat_name}")
         try:
-            with open(file_path, "r") as f:
-                loaded_messages = json.load(f)
-            self.messages = loaded_messages
-            self.console.print(f"[green]Chat '{chat_name}' loaded successfully.[/green]")
-            self.console.print("\n[bold underline]--- Loaded Chat History ---[/bold underline]")
-            for msg in self.messages:
-                if msg["role"] == "user":
-                    self.console.print(Panel(msg["content"], title="[bold blue]You[/bold blue]", border_style="blue"))
-                elif msg["role"] == "assistant":
-                    if "content" in msg:
-                        self.console.print(Panel(msg["content"], title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"))
-                    if "tool_calls" in msg:
-                        for tool_call in msg["tool_calls"]:
-                            self.console.print(Panel(f"Tool Call: {tool_call['function']['name']}\nArguments: {tool_call['function']['arguments']}", title="[bold yellow]Tool Call[/bold yellow]", border_style="yellow"))
-                elif msg["role"] == "system":
-                    self.console.print(Panel(msg["content"], title="[bold magenta]System[/bold magenta]", border_style="magenta"))
-                elif msg["role"] == "tool":
-                    self.console.print(Panel(f"Tool: {msg['name']}\nOutput: {msg['content']}", title="[bold yellow]Tool Output[/bold yellow]", border_style="yellow"))
+            # Find the matching file
+            matches = list(self.chat_dir.glob(chat_name + ".json"))
+            if not matches:
+                # Also check for partial matches that still uniquely identify a chat
+                all_chats = [f.name for f in self.chat_dir.iterdir()
+                             if f.suffix == ".json"]
+                partial_matches = [f for f in all_chats if chat_name in f]
+                if len(partial_matches) == 1:
+                    chat_file = self.chat_dir / partial_matches[0]
+                else:
+                    self.console.print(
+                        f"[bold red]Error: Chat file '{chat_name}.json' not found or not unique.[/bold red]")
+                    self.console.print("Available chats:")
+                    for f_name in sorted(all_chats, reverse=True):
+                        self.console.print(f"- {f_name}")
+                    return
+            else:
+                chat_file = matches[0]
 
-        except json.JSONDecodeError:
-            self.console.print(f"[bold red]Error: Invalid JSON in chat file: {file_path}[/bold red]")
-        except Exception as e:
-            self.console.print(f"[bold red]An error occurred while loading chat: {e}[/bold red]")
+            with open(chat_file, "r") as f:
+                loaded_messages = json.load(f)
+
+            # Clear the current messages and replace them
+            self.messages.clear()
+            # Render the loaded messages
+            for msg in loaded_messages:
+                self.messages.append(msg)  # Always append to history first
+
+                if msg.get("role") == "system":
+                    self.console.print(Panel(
+                        msg["content"], title="[bold cyan]System Prompt[/bold cyan]", border_style=self.get_border_style("dim")))
+                elif msg.get("role") == "user":
+                    self.console.print(Panel(
+                        msg["content"], title="[bold green]You[/bold green]", border_style="green"))
+                elif msg.get("role") == "assistant":
+                    # Handle assistant content and potential tool calls
+                    renderables = []
+                    if msg.get("content"):
+                        renderables.append(
+                            Text(msg["content"], justify="left"))
+                    if msg.get("tool_calls"):
+                        for tc_full in msg["tool_calls"]:
+                            name, args = tc_full.get("function", {}).get(
+                                "name", "..."), tc_full.get("function", {}).get("arguments", "")
+                            try:
+                                script = json.loads(
+                                    args or '{}').get('script', args)
+                                renderables.append(Panel(Syntax(script, name, theme="monokai", line_numbers=self.borders_enabled),
+                                                   title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                            except (json.JSONDecodeError, AttributeError):
+                                renderables.append(Panel(Text(
+                                    args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                    if renderables:
+                        self.console.print(Panel(Group(
+                            *renderables), title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"))
+
+                elif msg.get("role") == "tool":
+                    # Handle tool output display
+                    output_renderable = Text(msg["content"])
+                    self.console.print(Panel(
+                        output_renderable, title=f"[bold green]Tool Output: {msg.get('name', 'N/A')}[/bold green]", border_style="green"))
+
+            self.console.print(
+                "--- End of loaded conversation ---", style="dim")
+
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            self.console.print(f"[bold red]Error loading chat: {e}[/bold red]")
