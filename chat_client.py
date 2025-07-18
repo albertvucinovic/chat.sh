@@ -91,9 +91,7 @@ class ChatClient:
             self.console.print(
                 "[yellow]Warning: 'systemPrompt' file not found.[/yellow]")
 
-        system_prompt_content += f'\n\nYou are using this model: {self.current_model_key}'
         system_prompt_content += f'\nglobal folder: {Path(__file__).resolve().parent / "global_commands"}\n\n'
-
         try:
             with open("AI.md", "r", encoding="utf-8") as f:
                 aimd_content = f.read()
@@ -135,39 +133,32 @@ class ChatClient:
                 f"[bold red]Error: Env var '{api_key_env}' is not set for '{provider_name}'.[/bold red]")
             self.headers["Authorization"] = "Bearer NOT_SET"
 
-    def switch_model(self, model_key: str, initial_setup: bool = False):
-        if initial_setup:
-            self._update_provider_and_url()
-            self._initialize_system_prompt()
-            return
 
-        if not model_key:
-            self.console.print("[bold]Available models:[/bold]")
-            for name in self.models_config:
-                self.console.print(f"- {name}")
-            return
-
-        if model_key not in self.models_config:
-            self.console.print(
-                f"[bold red]Unknown model: '{model_key}'[/bold red]")
-            return
-
-        self.current_model_key = model_key
+def switch_model(self, model_key: str, initial_setup: bool = False):
+    if initial_setup:
         self._update_provider_and_url()
+        self._initialize_system_prompt()
+        return
 
-        new_system_prompt = self._build_system_prompt()
-        if self.messages and self.messages[0]["role"] == "system":
-            self.messages[0]["content"] = new_system_prompt
-            self.console.print(
-                f"[bold green]Switched to model: '{self.current_model_key}'. Chat context preserved.[/bold green]")
-            self.console.print(Panel(
-                new_system_prompt, title="[bold cyan]Updated System Prompt[/bold cyan]", border_style=self.get_border_style("dim")))
-        else:
-            self._initialize_system_prompt()
-            self.console.print(
-                f"[bold yellow]Warning: Chat history was malformed. Initialized new chat with '{self.current_model_key}'.[/bold yellow]")
+    if not model_key:
+        self.console.print("[bold]Available models:[/bold]")
+        for name in self.models_config:
+            self.console.print(f"- {name}")
+        return
 
-    def send_message(self, message: str):
+    if model_key not in self.models_config:
+        self.console.print(
+            f"[bold red]Unknown model: '{model_key}'[/bold red]")
+        return
+
+    self.current_model_key = model_key
+    self._update_provider_and_url()
+
+    self.console.print(
+        f"[bold green]Switched to model: '{self.current_model_key}'[/bold green]")
+
+
+def send_message(self, message: str):
         self.messages.append({"role": "user", "content": message})
 
         while True:
