@@ -33,6 +33,26 @@ TOOLS = [
 
 
 class ChatClient:
+    def get_recent_words_for_completion(self, limit=500):
+        # Only yield words from the last N user and assistant messages
+        import re
+        words = []
+        messages = self.messages[-50:] if hasattr(self, "messages") else []
+        for msg in messages:
+            if msg.get("role") in ("user", "assistant") and msg.get("content"):
+                words += re.findall(r"\b\w{3,}\b", msg["content"])
+        # Case insensitive deduplication, preserve order
+        seen = set()
+        out = []
+        for w in words[::-1]:
+            wl = w.lower()
+            if wl not in seen:
+                seen.add(wl)
+                out.append(w)
+            if len(out) >= limit:
+                break
+        return out[::-1]
+
     def __init__(self):
         self.headers = {"Content-Type": "application/json"}
         self.console = Console(force_terminal=True, legacy_windows=False)
