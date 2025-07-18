@@ -289,6 +289,63 @@ class ChatClient:
         self.console.print(
             f"[bold green]Switched to model: '{self.current_model_key}'[/bold green]")
 
+    def _parse_complete_message_for_tool_calls(self, message_content: str) -> list:
+        """
+        Attempt to parse a complete message as JSON tool calls.
+        Returns a list of tool calls if successful, empty list otherwise.
+        """
+        tool_calls = []
+        
+        if not message_content or not message_content.strip():
+            return tool_calls
+            
+        # Try to extract JSON from the message content
+        try:
+            # First, try direct JSON parsing
+            parsed = json.loads(message_content.strip())
+            if isinstance(parsed, dict) and 'tool_calls' in parsed:
+                return parsed['tool_calls']
+            elif isinstance(parsed, list):
+                return parsed
+            elif isinstance(parsed, dict) and 'type' in parsed and parsed['type'] == 'function':
+                return [parsed]
+        except json.JSONDecodeError:
+            pass
+        
+        # Try to extract JSON from markdown code blocks
+        json_pattern = r'```(?:json)?\s*({.*?})\s*```'
+        matches = re.findall(json_pattern, message_content, re.DOTALL)
+        
+        for match in matches:
+            try:
+                parsed = json.loads(match)
+                if isinstance(parsed, dict) and 'tool_calls' in parsed:
+                    tool_calls.extend(parsed['tool_calls'])
+                elif isinstance(parsed, dict) and 'type' in parsed and parsed['type'] == 'function':
+                    tool_calls.append(parsed)
+            except json.JSONDecodeError:
+                continue
+        
+        # Try to extract function calls from plain text
+        function_pattern = r'"type"\s*:\s*"function"[^}]*"name"\s*:\s*"([^"]+)"[^}]*"arguments"\s*:\s*({[^{}]*(?:{[^{}]*}[^{}]*)*})'
+        matches = re.findall(function_pattern, message_content)
+        
+        for name, args_str in matches:
+            try:
+                args = json.loads(args_str)
+                tool_calls.append({
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": json.dumps(args)
+                    }
+                })
+            except json.JSONDecodeError:
+                continue
+        
+        return tool_calls
+
+
     def send_message(self, message: str):
         self.messages.append({"role": "user", "content": message})
         while True:
@@ -306,6 +363,9 @@ class ChatClient:
                     response = requests.post(f"{self.base_url}", headers=self.headers, json={
                                              "model": api_model_name, "messages": self.messages, "tools": self.tools, "tool_choice": "auto", "stream": True}, timeout=120, stream=True)
                     response.raise_for_status()
+                    
+                    # Collect all content and tool calls from stream
+                    complete_content = ""
                     for line_bytes in response.iter_lines():
                         if not line_bytes:
                             continue
@@ -322,6 +382,7 @@ class ChatClient:
                             continue
                         if content := delta.get("content"):
                             assistant_text_parts.append(content)
+                            complete_content += content
                         if tool_calls_chunk := delta.get("tool_calls"):
                             for index, tc_delta in enumerate(tool_calls_chunk):
                                 buffer_index = tc_delta.get("index", index)
@@ -359,14 +420,44 @@ class ChatClient:
                 interrupted = True
             if interrupted:
                 return
+                
+            # After collecting the complete response, try to parse tool calls from content
+            complete_message = "".join(assistant_text_parts)
+            
+            # Check if we have tool calls in the buffer OR if we need to parse from content
+            if not tool_calls_buf and complete_message.strip():
+                # Try to parse complete message for tool calls
+                parsed_tool_calls = self._parse_complete_message_for_tool_calls(complete_message)
+                if parsed_tool_calls:
+                    tool_calls_buf = {}
+                    for idx, tc in enumerate(parsed_tool_calls):
+                        tool_calls_buf[idx] = {
+                            "id": f"call_{uuid.uuid4().hex[:10]}",
+                            "type": "function",
+                            "function": tc.get("function", tc)
+                        }
+            
             assistant_msg = {"role": "assistant"}
-            if text := "".join(assistant_text_parts):
-                assistant_msg["content"] = text
+            if complete_message:
+                assistant_msg["content"] = complete_message
             if tool_calls_buf:
                 assistant_msg["tool_calls"] = list(tool_calls_buf.values())
             if not assistant_msg.get("content") and not assistant_msg.get("tool_calls"):
                 return
             self.messages.append(assistant_msg)
+            
+            # Also check if the content itself contains tool calls that need parsing
+            if complete_message and not tool_calls_buf:
+                additional_tool_calls = self._parse_complete_message_for_tool_calls(complete_message)
+                if additional_tool_calls:
+                    for tc in additional_tool_calls:
+                        tc_with_id = {
+                            "id": f"call_{uuid.uuid4().hex[:10]}",
+                            "type": "function",
+                            "function": tc.get("function", tc)
+                        }
+                        self._handle_tool_call(tc_with_id)
+            
             if tool_calls := assistant_msg.get("tool_calls"):
                 for tc in tool_calls:
                     self._handle_tool_call(tc)
@@ -492,3 +583,4 @@ class ChatClient:
 
         except (FileNotFoundError, json.JSONDecodeError) as e:
             self.console.print(f"[bold red]Error loading chat: {e}[/bold red]")
+

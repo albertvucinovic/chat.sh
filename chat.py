@@ -111,6 +111,7 @@ def main():
             user_input = session.prompt().strip()
 
             if not user_input:
+                client.send_message(user_input) #Send empty messages also
                 continue
 
             elif user_input.startswith("b "):
