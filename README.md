@@ -27,8 +27,9 @@ Egg is a powerful, terminal-based chat application designed for developers and p
     - `Ctrl+B`: Toggle UI borders on/off.
     - `Ctrl+E`: Clear the current input line.
 - **Chat Management**:
-    - Save and load chat sessions.
-    - Execute local bash commands directly from the prompt.
+    - Save and load chat sessions with the `o <filename>` command
+    - Context management with `/pushContext` and `/popContext` commands
+    - Persistent chat history across model switches
 - **Memory System**: Persistent storage for context and useful information across sessions.
 - **Command System**: Extensible command system with local and global commands.
 
@@ -112,6 +113,10 @@ Run the application with the `chat.sh` script:
 ### Commands
 
 - **/model `<display_name>`**: Switch the active AI model.
+
+- **Context Commands**:
+  - `/pushContext <description>` - Save current chat and start new context
+  - `/popContext <return_value>` - Return to previous context and restore chat
   - Example: `/model Local Llama3`
   - Typing `/model ` and hitting `Tab` will show available models.
 
