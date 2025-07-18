@@ -269,4 +269,35 @@ class ChatClient:
         return str(file_path)
 
     def load_chat(self, chat_name: str):
-        self.console.print(f"Loading chat: {chat_name}")
+        file_path = self.chat_dir / chat_name
+        if not file_path.suffix == ".json":
+            file_path = file_path.with_suffix(".json")
+
+        if not file_path.exists():
+            self.console.print(f"[bold red]Error: Chat file not found: {file_path}[/bold red]")
+            return
+
+        try:
+            with open(file_path, "r") as f:
+                loaded_messages = json.load(f)
+            self.messages = loaded_messages
+            self.console.print(f"[green]Chat '{chat_name}' loaded successfully.[/green]")
+            self.console.print("\n[bold underline]--- Loaded Chat History ---[/bold underline]")
+            for msg in self.messages:
+                if msg["role"] == "user":
+                    self.console.print(Panel(msg["content"], title="[bold blue]You[/bold blue]", border_style="blue"))
+                elif msg["role"] == "assistant":
+                    if "content" in msg:
+                        self.console.print(Panel(msg["content"], title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"))
+                    if "tool_calls" in msg:
+                        for tool_call in msg["tool_calls"]:
+                            self.console.print(Panel(f"Tool Call: {tool_call['function']['name']}\nArguments: {tool_call['function']['arguments']}", title="[bold yellow]Tool Call[/bold yellow]", border_style="yellow"))
+                elif msg["role"] == "system":
+                    self.console.print(Panel(msg["content"], title="[bold magenta]System[/bold magenta]", border_style="magenta"))
+                elif msg["role"] == "tool":
+                    self.console.print(Panel(f"Tool: {msg['name']}\nOutput: {msg['content']}", title="[bold yellow]Tool Output[/bold yellow]", border_style="yellow"))
+
+        except json.JSONDecodeError:
+            self.console.print(f"[bold red]Error: Invalid JSON in chat file: {file_path}[/bold red]")
+        except Exception as e:
+            self.console.print(f"[bold red]An error occurred while loading chat: {e}[/bold red]")
