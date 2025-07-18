@@ -392,7 +392,6 @@ class ChatClient:
         
         return tool_calls
 
-
     def send_message(self, message: str):
         self.messages.append({"role": "user", "content": message})
         while True:
@@ -468,49 +467,45 @@ class ChatClient:
             if interrupted:
                 return
                 
-            # After collecting the complete response, try to parse tool calls from content
             complete_message = "".join(assistant_text_parts)
-            
-            # Check if we have tool calls in the buffer OR if we need to parse from content
+            should_redisplay = False
+
+            # If the streaming API didn't provide structured tool calls, parse them from content.
             if not tool_calls_buf and complete_message.strip():
-                # Try to parse complete message for tool calls
                 parsed_tool_calls = self._parse_complete_message_for_tool_calls(complete_message)
                 if parsed_tool_calls:
-                    tool_calls_buf = {}
-                    for idx, tc in enumerate(parsed_tool_calls):
-                        tool_calls_buf[idx] = {
+                    # Populate the buffer so the rest of the logic is consistent
+                    tool_calls_buf = {
+                        idx: {
                             "id": f"call_{uuid.uuid4().hex[:10]}",
                             "type": "function",
                             "function": tc.get("function", tc)
-                        }
+                        } for idx, tc in enumerate(parsed_tool_calls)
+                    }
+                    # Only re-display if the message IS the tool call, not if it CONTAINS it.
+                    # This handles cases where the model just sends a raw, un-highlighted JSON object.
+                    stripped_message = complete_message.strip()
+                    if stripped_message.startswith(("{", "[")) and stripped_message.endswith(("}", "]")):
+                        should_redisplay = True
             
             assistant_msg = {"role": "assistant"}
             if complete_message:
                 assistant_msg["content"] = complete_message
             if tool_calls_buf:
                 assistant_msg["tool_calls"] = list(tool_calls_buf.values())
+            
             if not assistant_msg.get("content") and not assistant_msg.get("tool_calls"):
-                return
+                return # Nothing to do
+            
             self.messages.append(assistant_msg)
             
-            # Also check if the content itself contains tool calls that need parsing
-            if complete_message and not tool_calls_buf:
-                additional_tool_calls = self._parse_complete_message_for_tool_calls(complete_message)
-                if additional_tool_calls:
-                    for tc in additional_tool_calls:
-                        tc_with_id = {
-                            "id": f"call_{uuid.uuid4().hex[:10]}",
-                            "type": "function",
-                            "function": tc.get("function", tc)
-                        }
-                        self._handle_tool_call(tc_with_id)
-            
+            # Centralized handling for all tool calls
             if tool_calls := assistant_msg.get("tool_calls"):
                 for tc in tool_calls:
-                    self._handle_tool_call(tc)
-                continue
-            break
-
+                    self._handle_tool_call(tc, display_call=should_redisplay)
+                continue # Loop back for another turn if there were tool calls
+            
+            break # No tool calls, so break the while loop
     def send_context_only(self, message: str):
         self.messages.append({"role": "user", "content": message})
         api_model_name = self.models_config.get(
@@ -527,7 +522,7 @@ class ChatClient:
                 f"\n[bold red]Error: Failed to send context to LLM: {e}[/bold red]")
             self.messages.pop()
 
-    def _handle_tool_call(self, call: Dict):
+    def _handle_tool_call(self, call: Dict, display_call: bool = True):
         fn_name = call["function"]["name"]
         try:
             args_raw = call["function"].get("arguments", "{}")
@@ -542,17 +537,18 @@ class ChatClient:
                                  "tool_call_id": call["id"], "content": "Error: Invalid arguments."})
             return
         
-        # Display the tool call consistently before execution
-        self.console.print(Panel(
-            Syntax(
-                json.dumps(args, indent=2) if args else "{}", 
-                "json", 
-                theme="monokai", 
-                line_numbers=self.borders_enabled
-            ), 
-            title=f"[bold yellow]Tool Call: {fn_name}[/bold yellow]", 
-            border_style="yellow"
-        ))
+        # Only display the tool call panel if the flag is True
+        if display_call:
+            self.console.print(Panel(
+                Syntax(
+                    json.dumps(args, indent=2) if args else "{}", 
+                    "json", 
+                    theme="monokai", 
+                    line_numbers=self.borders_enabled
+                ), 
+                title=f"[bold yellow]Tool Call: {fn_name}[/bold yellow]", 
+                border_style="yellow"
+            ))
         
         try:
             execute = confirm(f"Execute the {fn_name} tool call shown above?")
@@ -579,6 +575,7 @@ class ChatClient:
                 output), title="[bold green]Execution Output[/bold green]", border_style="green"))
         self.messages.append(
             {"role": "tool", "name": fn_name, "tool_call_id": call["id"], "content": output})
+
 
     def toggle_borders(self) -> str:
         self.borders_enabled = not self.borders_enabled
