@@ -292,92 +292,99 @@ class ChatClient:
     def _parse_complete_message_for_tool_calls(self, message_content: str) -> list:
         """
         Attempt to parse a complete message as JSON tool calls.
+        Handles various formats including direct JSON, JSON in markdown, and multiple
+        tool call structures (standard API and simplified).
         Returns a list of tool calls if successful, empty list otherwise.
         """
         tool_calls = []
         
         if not message_content or not message_content.strip():
             return tool_calls
-            
-        # Try to extract JSON from the message content
+
+        # Helper function to process a list of dictionaries into the standard tool call format
+        def process_tc_list(tc_list: List[Dict]) -> List[Dict]:
+            processed = []
+            for tc in tc_list:
+                if not isinstance(tc, dict):
+                    continue
+                
+                name, args = None, {}
+                # Standard format: {"function": {"name": ..., "arguments": ...}}
+                if 'function' in tc and isinstance(tc.get('function'), dict):
+                    func_dict = tc['function']
+                    name = func_dict.get('name')
+                    args = func_dict.get('arguments', {})
+                # Simplified format that caused the error: {"name": ..., "arguments": ...}
+                elif 'name' in tc:
+                    name = tc.get('name')
+                    args = tc.get('arguments', {})
+                
+                if name:
+                    # Ensure arguments are a JSON string for downstream processing
+                    args_str = json.dumps(args) if not isinstance(args, str) else (args or '{}')
+                    try:
+                        json.loads(args_str)
+                    except json.JSONDecodeError:
+                        continue # Skip if arguments are not valid JSON
+                    
+                    processed.append({
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": args_str
+                        }
+                    })
+            return processed
+
+        # --- Main Parsing Logic ---
+
+        # 1. Try to parse the entire message content as JSON
         try:
-            # First, try direct JSON parsing
             parsed = json.loads(message_content.strip())
-            if isinstance(parsed, dict) and 'tool_calls' in parsed:
-                # Ensure arguments are JSON strings
-                return [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": tc["function"]["name"],
-                            "arguments": json.dumps(tc["function"].get("arguments", {}))
-                        }
-                    }
-                    for tc in parsed['tool_calls']
-                ]
+            
+            # Case 1.1: Root is a dict with a "tool_calls" key
+            if isinstance(parsed, dict) and 'tool_calls' in parsed and isinstance(parsed.get('tool_calls'), list):
+                return process_tc_list(parsed['tool_calls'])
+            
+            # Case 1.2: Root is a list of tool calls
             elif isinstance(parsed, list):
-                # Ensure arguments are JSON strings
-                return [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": tc["function"]["name"],
-                            "arguments": json.dumps(tc["function"].get("arguments", {}))
-                        }
-                    }
-                    for tc in parsed
-                ]
-            elif isinstance(parsed, dict) and 'type' in parsed and parsed['type'] == 'function':
-                return [{
-                    "type": "function",
-                    "function": {
-                        "name": parsed["function"]["name"],
-                        "arguments": json.dumps(parsed["function"].get("arguments", {}))
-                    }
-                }]
+                return process_tc_list(parsed)
+
+            # Case 1.3: Root is a single tool call dict
+            elif isinstance(parsed, dict):
+                return process_tc_list([parsed]) # Wrap in a list to reuse the processor
+
         except json.JSONDecodeError:
+            # If direct parsing fails, it might be embedded in markdown or plain text.
             pass
         
-        # Try to extract JSON from markdown code blocks
-        json_pattern = r'```(?:json)?\s*({.*?})\s*```'
+        # 2. Try to extract JSON from markdown code blocks
+        json_pattern = r'```(?:json)?\s*(.*?)\s*```'
         matches = re.findall(json_pattern, message_content, re.DOTALL)
         
         for match in matches:
-            try:
-                parsed = json.loads(match)
-                if isinstance(parsed, dict) and 'tool_calls' in parsed:
-                    # Ensure arguments are JSON strings
-                    for tc in parsed['tool_calls']:
-                        tool_calls.append({
-                            "type": "function",
-                            "function": {
-                                "name": tc["function"]["name"],
-                                "arguments": json.dumps(tc["function"].get("arguments", {}))
-                            }
-                        })
-                elif isinstance(parsed, dict) and 'type' in parsed and parsed['type'] == 'function':
-                    tool_calls.append({
-                        "type": "function",
-                        "function": {
-                            "name": parsed["function"]["name"],
-                            "arguments": json.dumps(parsed["function"].get("arguments", {}))
-                        }
-                    })
-            except json.JSONDecodeError:
-                continue
+            # Recursively call this function on the extracted content.
+            # This is cleaner and avoids duplicating the parsing logic.
+            parsed_calls = self._parse_complete_message_for_tool_calls(match)
+            if parsed_calls:
+                tool_calls.extend(parsed_calls)
         
-        # Try to extract function calls from plain text
+        if tool_calls:
+            return tool_calls
+        
+        # 3. Last resort: Try to extract function calls from plain text using regex
         function_pattern = r'"type"\s*:\s*"function"[^}]*"name"\s*:\s*"([^"]+)"[^}]*"arguments"\s*:\s*({[^{}]*(?:{[^{}]*}[^{}]*)*})'
         matches = re.findall(function_pattern, message_content)
         
         for name, args_str in matches:
             try:
-                args = json.loads(args_str)
+                # Validate that args_str is valid JSON
+                json.loads(args_str)
                 tool_calls.append({
                     "type": "function",
                     "function": {
                         "name": name,
-                        "arguments": json.dumps(args)
+                        "arguments": args_str
                     }
                 })
             except json.JSONDecodeError:
@@ -641,4 +648,3 @@ class ChatClient:
 
         except (FileNotFoundError, json.JSONDecodeError) as e:
             self.console.print(f"[bold red]Error loading chat: {e}[/bold red]")
-
