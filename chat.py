@@ -1,4 +1,5 @@
 import sys
+import os
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -124,6 +125,31 @@ def main():
             elif user_input.startswith("/model"):
                 model_key = user_input[len("/model"):].strip()
                 client.switch_model(model_key)
+                continue
+
+            elif user_input.startswith("/global/"):
+                command_file = user_input[len("/global/"):].strip()
+                if not command_file.endswith(".md"):
+                    command_file += ".md"
+
+                script_dir = os.path.dirname(os.path.realpath(__file__))
+                file_path = os.path.join(
+                    script_dir, "global_commands", command_file)
+
+                try:
+                    with open(file_path, 'r') as f:
+                        command_content = f.read()
+                    console.print(Panel(
+                        f"Executing global command: [bold]{command_file}[/bold]", border_style="yellow"))
+                    console.print(Panel(command_content))
+                    # Treat the file content as the new user message
+                    client.send_message(command_content)
+                except FileNotFoundError:
+                    console.print(
+                        f"[bold red]Error: Global command file not found: {command_file}[/bold red]")
+                except Exception as e:
+                    console.print(
+                        f"[bold red]Error executing global command: {e}[/bold red]")
                 continue
 
             client.send_message(user_input)
