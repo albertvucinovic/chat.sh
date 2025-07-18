@@ -10,6 +10,7 @@ from chat_client import ChatClient
 from completer import PtkCompleter
 from executors import run_bash_script
 
+
 def main():
     """
     Main function to run the chat application.
@@ -19,7 +20,8 @@ def main():
         client = ChatClient()
     except ValueError as e:
         console.print(f"[bold red]Error: {e}[/bold red]")
-        console.print("Please provide API_KEY, API_MODEL, API_BASE environment variables")
+        console.print(
+            "Please provide API_KEY, API_MODEL, API_BASE environment variables")
         return
 
     # --- Dynamic Prompt Setup ---
@@ -72,7 +74,8 @@ def main():
 
     def shutdown():
         """Saves the chat and exits cleanly."""
-        console.print("\n\n[bold yellow]Saving chat and exiting...[/bold yellow]")
+        console.print(
+            "\n\n[bold yellow]Saving chat and exiting...[/bold yellow]")
         saved_path = client.save_chat()
         console.print(f"[green]Chat saved to:[/green] {saved_path}")
         sys.exit(0)
@@ -92,7 +95,8 @@ def main():
                     output = run_bash_script(script_to_run)
                     output_renderable = Text(output)
                     if client.borders_enabled:
-                        console.print(Panel(output_renderable, title="[bold green]Local Command Output[/bold green]", border_style="green"))
+                        console.print(Panel(
+                            output_renderable, title="[bold green]Local Command Output[/bold green]", border_style="green"))
                     else:
                         console.print(output_renderable)
 
@@ -103,7 +107,8 @@ def main():
                     )
                     client.send_context_only(context_message)
                 else:
-                    console.print("[yellow]Empty bash command, skipping.[/yellow]")
+                    console.print(
+                        "[yellow]Empty bash command, skipping.[/yellow]")
                 continue
 
             elif user_input.startswith("o "):
@@ -113,6 +118,14 @@ def main():
                 else:
                     console.print("[yellow]No chat file specified.[/yellow]")
                 continue
+            elif user_input.startswith("/model "):
+                model_name = user_input[7:].strip()
+                if model_name:
+                    client.switch_model(model_name)
+                else:
+                    console.print(
+                        "[yellow]Please specify a model name.[/yellow]")
+                continue
 
             client.send_message(user_input)
 
@@ -120,6 +133,7 @@ def main():
             shutdown()
         except EOFError:
             shutdown()
+
 
 if __name__ == "__main__":
     main()
