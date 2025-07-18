@@ -539,10 +539,22 @@ class ChatClient:
         
         # Only display the tool call panel if the flag is True
         if display_call:
+            display_content = ""
+            syntax_lang = "json"  # Default to json
+
+            # Check if 'script' key exists for specialized display, just like in the streaming logic
+            if isinstance(args, dict) and "script" in args:
+                display_content = args.get("script", "")
+                # Use the tool name (e.g., 'bash', 'python') for better syntax highlighting
+                syntax_lang = fn_name
+            else:
+                # Fallback for non-script tools (like push/pop) or malformed args
+                display_content = json.dumps(args, indent=2) if args else "{}"
+
             self.console.print(Panel(
                 Syntax(
-                    json.dumps(args, indent=2) if args else "{}", 
-                    "json", 
+                    display_content,
+                    syntax_lang,
                     theme="monokai", 
                     line_numbers=self.borders_enabled
                 ), 
@@ -575,7 +587,6 @@ class ChatClient:
                 output), title="[bold green]Execution Output[/bold green]", border_style="green"))
         self.messages.append(
             {"role": "tool", "name": fn_name, "tool_call_id": call["id"], "content": output})
-
 
     def toggle_borders(self) -> str:
         self.borders_enabled = not self.borders_enabled
