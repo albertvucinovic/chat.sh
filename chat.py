@@ -28,7 +28,7 @@ def main():
         """Returns the prompt string based on border state."""
         return "[You]: " if client.borders_enabled else "You: "
 
-    def get_continuation_message():
+    def get_continuation_message(width, line_number, wrap_count):
         """Returns the continuation prompt string based on border state."""
         return "[...] " if client.borders_enabled else "... "
 
