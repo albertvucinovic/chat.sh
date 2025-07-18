@@ -65,6 +65,13 @@ class PtkCompleter(Completer):
                 yield Completion(rel_path, start_position=-len(prefix))
             return
 
+        # --- Fallback: General Filesystem Path Completion ---
+        if word_before_cursor:
+            suggestions = self._get_filesystem_suggestions(word_before_cursor)
+            for s in suggestions:
+                yield Completion(s, start_position=-len(word_before_cursor))
+            return
+
         # --- Default: Filesystem path completion ---
         if os.path.sep in text_before_cursor or text_before_cursor.startswith(('.', '/')):
             for s in self._get_filesystem_suggestions(text_before_cursor):
