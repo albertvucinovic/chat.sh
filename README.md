@@ -129,6 +129,8 @@ Run the application with the `chat.sh` script:
 - **/global/<command>**: Execute global commands from the global_commands directory.
   - Supports autocompletion for available commands.
 
+- **/toggleYesToolFlag**: Toggle whether tool calls (bash/python execution) are automatically approved without user confirmation.
+
 ### Advanced Features
 
 - **Memory System**: The assistant can store and retrieve information across sessions using the memory system.
