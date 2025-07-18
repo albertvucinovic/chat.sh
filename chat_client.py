@@ -626,8 +626,6 @@ class ChatClient:
                 output = self.pop_context(args.get("return_value", ""))
             else:
                 output = f"Unknown tool: {fn_name}"
-            if not output:
-                output="--- OUTPUT EMPTY AFTER EXECUTION ---"
                 
             self.console.print(Panel(Text(
                 output), title="[bold green]Execution Output[/bold green]", border_style="green", box = self.boxStyle))

@@ -19,7 +19,7 @@ def run_bash_script(script: str) -> str:
         if result.stderr:
             output += f"--- STDERR ---\n{result.stderr.strip()}\n"
 
-        return output.strip() or "--- (No output) ---"
+        return output.strip() or "--- The command executed successfully and produced no output ---"
     except subprocess.TimeoutExpired:
         return "--- STDERR ---\nError: Command timed out after 60 seconds."
     except Exception as e:
@@ -44,7 +44,7 @@ def run_python_script(script: str) -> str:
         if stderr_val:
             output += f"--- STDERR ---\n{stderr_val}\n"
 
-        return output.strip() or "--- (No output) ---"
+        return output.strip() or "--- The command executed successfully and produced no output ---"
     except Exception as e:
         sys.stdout, sys.stderr = old_stdout, old_stderr
         return f"--- STDERR ---\nError executing Python script: {e}"
