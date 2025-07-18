@@ -4,6 +4,11 @@
         "model_name": "../vllm/Models/mistralai/Devstral-Small-2507-UD-QK_K.gguf",
         "max_tokens": 40000
     },
+    "Kimi K2 Groq": {
+        "provider": "groq",
+        "model_name": "moonshotai/kimi-k2-instruct",
+        "max_tokens": 640000
+    },
     "Google Gemini 2.5 Flash": {
         "provider": "google",
         "model_name": "gemini-2.5-flash",
