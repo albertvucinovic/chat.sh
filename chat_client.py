@@ -16,6 +16,7 @@ from rich.panel import Panel
 from rich.live import Live
 from rich.syntax import Syntax
 from rich.text import Text
+from rich import box
 from prompt_toolkit.shortcuts import confirm
 
 from executors import run_bash_script, run_python_script
@@ -67,6 +68,7 @@ class ChatClient:
         self.tools = TOOLS
         self.context_stack = []  # Stack to store saved chat filenames
         self.original_system_prompt = ""  # Store the original system prompt
+        self.boxStyle = box.ROUNDED
 
         parent = Path(__file__).resolve().parent 
 
@@ -113,8 +115,14 @@ class ChatClient:
 
     def _initialize_system_prompt(self):
         system_prompt_string = self._build_system_prompt()
-        self.console.print(Panel(
-            system_prompt_string, title="[bold cyan]System Prompt[/bold cyan]", border_style=self.get_border_style("dim")))
+        self.console.print(
+            Panel(
+                system_prompt_string,
+                title="[bold cyan]System Prompt[/bold cyan]",
+                border_style=self.get_border_style("dim"),
+                box = self.boxStyle
+            )
+        )
         self.messages: List[Dict] = [
             {"role": "system", "content": system_prompt_string}]
         self.original_system_prompt = system_prompt_string
@@ -155,13 +163,12 @@ class ChatClient:
         
         # Render the new, clean context display (only system prompt and the initial context message)
         self.console.print(Panel(
-            self.original_system_prompt, title="[bold cyan]System Prompt[/bold cyan]", border_style=self.get_border_style("dim")))
+            self.original_system_prompt, title="[bold cyan]System Prompt[/bold cyan]", border_style=self.get_border_style("dim"), box = self.boxStyle))
         self.console.print(Panel(
-            context, title="[bold green]You (New Context)[/bold green]", border_style="green"))
-        
+            context, title="[bold green]You (New Context)[/bold green]", border_style="green", box = self.boxStyle))
         self.console.print(Panel(f"[bold green]⬇️ Context Pushed[/bold green]", 
                                 title="[bold]Entering New Context[/bold]", 
-                                border_style="green"))
+                                border_style="green", box = self.boxStyle))
         self.console.print(f"[dim]Previous context saved to: {Path(saved_file_path).name}[/dim]")
         
         return f"Entered new context: {context}"
@@ -179,13 +186,13 @@ class ChatClient:
             self.messages.append({"role": "user", "content": f"Return value from push/pop context: {return_value}"})
             
             self.console.print(Panel(
-                self.original_system_prompt, title="[bold cyan]System Prompt[/bold cyan]", border_style=self.get_border_style("dim")))
+                self.original_system_prompt, title="[bold cyan]System Prompt[/bold cyan]", border_style=self.get_border_style("dim"), box = self.boxStyle))
             self.console.print(Panel(
                 f"Return value from push/pop context: {return_value}", 
-                title="[bold green]You[/bold green]", border_style="green"))
+                title="[bold green]You[/bold green]", border_style="green", box = self.boxStyle))
             self.console.print(Panel(f"[bold red]⬆️ Context Pop (Stack Empty)[/bold red]", 
-                                    title="[bold]No Previous Context Found[/bold]", 
-                                    border_style="red"))
+                                    title="[bold]Context Management[/bold]", 
+                                    border_style="red", box = self.boxStyle))
             self.console.print(f"[dim]Current conversation saved: {Path(current_sub_context_file).name}[/dim]")
             return f"No previous context to return to. Return value: {return_value}"
         
@@ -222,7 +229,7 @@ class ChatClient:
         
         self.console.print(Panel(f"[bold yellow]⬆️ Context Popped[/bold yellow]", 
                                 title="[bold]Returning to Previous Context[/bold]", 
-                                border_style="yellow"))
+                                border_style="yellow", box = self.boxStyle))
         self.console.print(f"[dim]Current sub-context saved: {Path(current_sub_context_file).name}[/dim]")
         self.console.print(f"[dim]Restored from: {Path(previous_context_file).name}[/dim]")
         
@@ -233,8 +240,12 @@ class ChatClient:
         try:
             if msg.get("role") == "user":
                 content = msg.get("content", "") or "[No content]"
-                self.console.print(Panel(
-                    content, title="[bold green]You[/bold green]", border_style="green"))
+                if self.borders_enabled:
+                    self.console.print(Panel(
+                        content, title="[bold green]You[/bold green]", border_style="green"))
+                else:
+                    self.console.print(f"[bold green]You:[/bold green] {content}")
+                    
             elif msg.get("role") == "assistant":
                 content = msg.get("content", "") or "[No content]"
                 renderables = []
@@ -248,24 +259,24 @@ class ChatClient:
                             # For rendering, if it's a tool call, show the tool code as Syntax
                             script = json.loads(args or '{}').get('script', args)
                             renderables.append(Panel(Syntax(script, name, theme="monokai", line_numbers=self.borders_enabled),
-                                               title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                                               title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow", box = self.boxStyle))
                         except (json.JSONDecodeError, AttributeError):
                             # If it's not a parsable script, just show the arguments as text
                             renderables.append(Panel(Text(
-                                args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                                args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow", box = self.boxStyle))
                 if renderables:
                     self.console.print(Panel(Group(
-                        *renderables), title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"))
+                        *renderables), title="[bold cyan]Assistant[/bold cyan]", border_style="cyan", box = self.boxStyle))
                 else:
                     # Fallback for assistant message with no content and no tool_calls
                     self.console.print(Panel(
-                        "[No content or tool calls]", title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"))
+                        "[No content or tool calls]", title="[bold cyan]Assistant[/bold cyan]", border_style="cyan", box = self.boxStyle))
 
             elif msg.get("role") == "tool":
                 content = msg.get("content", "") or "[No output]"
                 output_renderable = Text(content)
                 self.console.print(Panel(
-                    output_renderable, title=f"[bold green]Tool Output: {msg.get('name', 'N/A')}[/bold green]", border_style="green"))
+                    output_renderable, title=f"[bold green]Tool Output: {msg.get('name', 'N/A')}[/bold green]", border_style="green", box = self.boxStyle))
         except Exception as e:
             self.console.print(f"[red]Error rendering message: {e}[/red]")
 
@@ -424,8 +435,10 @@ class ChatClient:
             assistant_text_parts, tool_calls_buf, interrupted = [], {}, False
             try:
                 with Live(console=self.console, auto_refresh=False) as live:
-                    live.update(
-                        Panel("[dim]Assistant is thinking...[/dim]", border_style="cyan"), refresh=True)
+                    live.update(Panel(
+                        "[dim]Assistant is thinking...[/dim]",
+                        border_style="cyan", box = self.boxStyle),
+                        refresh=True)
                     response = requests.post(f"{self.base_url}", headers=self.headers, json={
                                              "model": api_model_name, "messages": self.messages, "tools": self.tools, "tool_choice": "auto", "stream": True}, timeout=120, stream=True)
                     response.raise_for_status()
@@ -474,12 +487,18 @@ class ChatClient:
                                 script = json.loads(
                                     args or '{}').get('script', args)
                                 renderables.append(Panel(Syntax(script, name, theme="monokai", line_numbers=self.borders_enabled),
-                                                   title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                                                   title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow", box = self.boxStyle))
                             except (json.JSONDecodeError, AttributeError):
                                 renderables.append(Panel(Text(
-                                    args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
-                        live.update(Panel(Group(
-                            *renderables), title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"), refresh=True)
+                                    args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow", box = self.boxStyle))
+                        live.update(
+                            Panel(
+                                Group(*renderables),
+                                title="[bold cyan]Assistant[/bold cyan]",
+                                border_style="cyan", box = self.boxStyle
+                            ),
+                            refresh=True
+                        )
             except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
                 self.console.print(f"\n[bold red]Error: {e}[/bold red]" if not isinstance(
                     e, KeyboardInterrupt) else "\n[bold yellow]Interrupted.[/bold yellow]")
@@ -579,7 +598,7 @@ class ChatClient:
                     line_numbers=self.borders_enabled
                 ), 
                 title=f"[bold yellow]Tool Call: {fn_name}[/bold yellow]", 
-                border_style="yellow"
+                border_style="yellow", box = self.boxStyle
             ))
         
         try:
@@ -604,12 +623,13 @@ class ChatClient:
                 output = f"Unknown tool: {fn_name}"
                 
             self.console.print(Panel(Text(
-                output), title="[bold green]Execution Output[/bold green]", border_style="green"))
+                output), title="[bold green]Execution Output[/bold green]", border_style="green", box = self.boxStyle))
         self.messages.append(
             {"role": "tool", "name": fn_name, "tool_call_id": call["id"], "content": output})
 
     def toggle_borders(self) -> str:
         self.borders_enabled = not self.borders_enabled
+        self.boxStyle = box.ROUNDED if self.borders_enabled else box.MINIMAL
         return f"Borders are now {'ON' if self.borders_enabled else 'OFF'}"
 
     def get_border_style(self, style: str) -> str:
