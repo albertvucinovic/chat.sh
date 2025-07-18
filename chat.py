@@ -20,8 +20,7 @@ def main():
         client = ChatClient()
     except ValueError as e:
         console.print(f"[bold red]Error: {e}[/bold red]")
-        console.print(
-            "Please provide API_KEY, API_MODEL, API_BASE environment variables")
+        console.print("Please provide necessary API environment variables.")
         return
 
     # --- Dynamic Prompt Setup ---
@@ -39,8 +38,7 @@ def main():
         completer=PtkCompleter(client),
         auto_suggest=AutoSuggestFromHistory(),
         multiline=True,
-        # Initialize with the function's *result* (a string), not the function itself.
-        prompt_continuation=get_continuation_message(),
+        prompt_continuation=get_continuation_message,
     )
 
     # --- Key Bindings for prompt-toolkit ---
@@ -54,19 +52,23 @@ def main():
     def _(event):
         event.app.exit(exception=KeyboardInterrupt)
 
+    @kb.add("c-e")
+    def _(event):
+        """Clears the current input buffer."""
+        event.current_buffer.reset()
+
     @kb.add("c-b")
     def _(event):
         """Toggles UI borders and prints a status message above the prompt."""
-        message = client.toggle_borders()
+        client.toggle_borders()
         session.prompt_continuation = get_continuation_message()
 
-    # Assign the key bindings to the session *after* they are defined.
     session.key_bindings = kb
 
     console.print(
         Panel(
             "Chat started. [bold]Tab[/bold] to autocomplete. [bold]Ctrl+D[/bold] to submit.\n"
-            "[bold]Ctrl+B[/bold] to toggle borders. [bold]Ctrl+C[/bold] to exit or interrupt.",
+            "[bold]Ctrl+B[/bold] to toggle borders. [bold]Ctrl+E[/bold] to clear input. [bold]Ctrl+C[/bold] to exit.",
             title="[bold]Welcome[/bold]",
             border_style=client.get_border_style("magenta")
         )
@@ -101,9 +103,9 @@ def main():
                         console.print(output_renderable)
 
                     context_message = (
-                        "User executed a local command.\n"
-                        f"Command:\n```bash\n{script_to_run}\n```\n\n"
-                        f"Output:\n---\n{output}\n---"
+                        "User executed a local command.\\n"
+                        f"Command:\\n```bash\\n{script_to_run}\\n```\\n\\n"
+                        f"Output:\\n---\\n{output}\\n---"
                     )
                     client.send_context_only(context_message)
                 else:
@@ -118,13 +120,10 @@ def main():
                 else:
                     console.print("[yellow]No chat file specified.[/yellow]")
                 continue
-            elif user_input.startswith("/model "):
-                model_name = user_input[7:].strip()
-                if model_name:
-                    client.switch_model(model_name)
-                else:
-                    console.print(
-                        "[yellow]Please specify a model name.[/yellow]")
+
+            elif user_input.startswith("/model"):
+                model_key = user_input[len("/model"):].strip()
+                client.switch_model(model_key)
                 continue
 
             client.send_message(user_input)

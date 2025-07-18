@@ -52,7 +52,6 @@ class ChatClient:
         self.borders_enabled = True
         self.chat_dir = Path.cwd() / "localChats"
         self.chat_dir.mkdir(parents=True, exist_ok=True)
-
         self.current_model_key = os.environ.get("API_MODEL", "OpenAI GPT-4o")
         self.base_url = None
         self.models_config = {}
@@ -75,7 +74,7 @@ class ChatClient:
             else:
                 self.console.print("[bold red]Fatal: No models configured in models.json.[/bold red]")
                 sys.exit(1)
-
+        
         self.switch_model(self.current_model_key, initial_setup=True)
 
     def _build_system_prompt(self) -> str:
@@ -104,18 +103,14 @@ class ChatClient:
         if self.current_model_key not in self.models_config:
             self.console.print(f"[bold red]Error: Current model key '{self.current_model_key}' not found in config.[/bold red]")
             return
-
         model_config = self.models_config[self.current_model_key]
         provider_name = model_config.get("provider")
-
         if not provider_name or provider_name not in self.providers_config:
             self.console.print(f"[bold red]Error: Provider '{provider_name}' not found in providers.json.[/bold red]")
             return
-        
         provider_config = self.providers_config[provider_name]
         self.base_url = provider_config.get("api_base")
         api_key_env = provider_config.get("api_key_env")
-
         if api_key_env and (api_key := os.environ.get(api_key_env)):
             self.headers["Authorization"] = f"Bearer {api_key}"
         else:
@@ -127,60 +122,47 @@ class ChatClient:
             self._update_provider_and_url()
             self._initialize_system_prompt()
             return
-            
         if not model_key:
             self.console.print("[bold]Available models:[/bold]")
             for name in self.models_config:
                 self.console.print(f"- {name}")
             return
-
         if model_key not in self.models_config:
             self.console.print(f"[bold red]Unknown model: '{model_key}'[/bold red]")
             return
-        
         self.current_model_key = model_key
         self._update_provider_and_url()
         self.console.print(f"[bold green]Switched to model: '{self.current_model_key}'[/bold green]")
 
     def send_message(self, message: str):
         self.messages.append({"role": "user", "content": message})
-        
         while True:
             model_config = self.models_config.get(self.current_model_key, {})
             api_model_name = model_config.get("model_name")
             if not api_model_name:
-                self.console.print("[bold red]Could not find API model name for current selection. Aborting send.[/bold red]")
+                self.console.print("[bold red]Could not find API model name. Aborting send.[/bold red]")
                 return
 
             assistant_text_parts: list[str] = []
             tool_calls_buf: dict[int, dict] = {}
             interrupted = False
-
             try:
                 with Live(console=self.console, auto_refresh=False) as live:
                     live.update(Panel("[dim]Assistant is thinking...[/dim]", border_style="cyan"), refresh=True)
-                    
                     response = requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": self.messages, "tools": self.tools, "tool_choice": "auto", "stream": True}, timeout=120, stream=True)
                     response.raise_for_status()
-
                     for line_bytes in response.iter_lines():
                         if not line_bytes: continue
-                        
                         line = line_bytes.decode('utf-8')
                         if not line.startswith("data: "): continue
-
                         data = line[6:]
                         if data == "[DONE]": break
-
                         try:
                             chunk_json = json.loads(data)
                             delta = chunk_json.get("choices", [{}])[0].get("delta", {})
-                        except (json.JSONDecodeError, IndexError):
-                            continue
-
+                        except (json.JSONDecodeError, IndexError): continue
                         if content := delta.get("content"):
                             assistant_text_parts.append(content)
-
                         if tool_calls_chunk := delta.get("tool_calls"):
                             for index, tc_delta in enumerate(tool_calls_chunk):
                                 buffer_index = tc_delta.get("index", index)
@@ -191,7 +173,6 @@ class ChatClient:
                                 if f_delta := tc_delta.get("function"):
                                     if f_delta.get("name"): tc_full["function"]["name"] += f_delta["name"]
                                     if f_delta.get("arguments"): tc_full["function"]["arguments"] += f_delta["arguments"]
-                        
                         renderables = []
                         if assistant_text_parts:
                             renderables.append(Text("".join(assistant_text_parts), justify="left"))
@@ -205,34 +186,36 @@ class ChatClient:
                             except (json.JSONDecodeError, AttributeError):
                                 renderables.append(Panel(Text(args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
                         live.update(Panel(Group(*renderables), title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"), refresh=True)
-
             except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
-                if isinstance(e, KeyboardInterrupt):
-                    self.console.print("\n[bold yellow]Interrupted.[/bold yellow]")
-                else:
-                    self.console.print(f"\n[bold red]Error: {e}[/bold red]")
+                if isinstance(e, KeyboardInterrupt): self.console.print("\n[bold yellow]Interrupted.[/bold yellow]")
+                else: self.console.print(f"\n[bold red]Error: {e}[/bold red]")
                 interrupted = True
-
             if interrupted: return
-
             assistant_msg: dict = {"role": "assistant"}
             full_text = "".join(assistant_text_parts)
-            if full_text:
-                assistant_msg["content"] = full_text
-            if tool_calls_buf:
-                assistant_msg["tool_calls"] = list(tool_calls_buf.values())
-            
-            if not assistant_msg.get("content") and not assistant_msg.get("tool_calls"):
-                return
-            
+            if full_text: assistant_msg["content"] = full_text
+            if tool_calls_buf: assistant_msg["tool_calls"] = list(tool_calls_buf.values())
+            if not assistant_msg.get("content") and not assistant_msg.get("tool_calls"): return
             self.messages.append(assistant_msg)
-
             if tool_calls := assistant_msg.get("tool_calls"):
                 for tc in tool_calls:
                     self._handle_tool_call(tc)
                 continue
-            
             break
+
+    def send_context_only(self, message: str):
+        self.messages.append({"role": "user", "content": message})
+        model_config = self.models_config.get(self.current_model_key, {})
+        api_model_name = model_config.get("model_name")
+        if not api_model_name:
+            self.console.print("[bold red]Could not find API model name. Aborting send.[/bold red]")
+            return
+        try:
+            response = requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": self.messages, "stream": False, "max_tokens": 1}, timeout=30)
+            response.raise_for_status()
+        except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
+            self.console.print(f"\n[bold red]Error: Failed to send context to LLM: {e}[/bold red]")
+            self.messages.pop()
 
     def _handle_tool_call(self, call: Dict):
         fn_name = call["function"]["name"]
@@ -244,14 +227,11 @@ class ChatClient:
             self.console.print(f"\n[bold red]Error decoding args for {fn_name}.[/bold red]")
             self.messages.append({"role": "tool", "name": fn_name, "tool_call_id": call["id"], "content": "Error: Invalid arguments."})
             return
-
         call_id = call["id"]
-        
         try:
             execute = confirm(f"Execute the {fn_name} tool call shown above?")
         except (EOFError, KeyboardInterrupt):
             execute = False
-
         if not execute:
             output = "--- SKIPPED BY USER ---"
             self.console.print("[yellow]Skipped by user.[/yellow]")
@@ -259,7 +239,6 @@ class ChatClient:
             self.console.print("[cyan]Executing...[/cyan]")
             output = run_bash_script(script) if fn_name == "bash" else run_python_script(script)
             self.console.print(Panel(Text(output), title="[bold green]Execution Output[/bold green]", border_style="green"))
-
         self.messages.append({"role": "tool", "name": fn_name, "tool_call_id": call_id, "content": output})
             
     def toggle_borders(self) -> str:
