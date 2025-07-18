@@ -7,7 +7,7 @@
     "Kimi K2 Groq": {
         "provider": "groq",
         "model_name": "moonshotai/kimi-k2-instruct",
-        "max_tokens": 640000
+        "max_tokens": 128000
     },
     "Google Gemini 2.5 Flash": {
         "provider": "google",
