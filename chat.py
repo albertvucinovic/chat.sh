@@ -131,9 +131,7 @@ def main():
                         f"Command:\n\`\`\`bash\n{script_to_run}\n\`\`\`\n\n"
                         f"Output:\n---\n{output}\n---"
                     )
-                    # send_context_only is for sending info to LLM without expecting a response
-                    # This is already handled as a tool output, no need to send again as user message context
-                    # client.send_context_only(context_message)
+                    client.send_context_only(context_message)
                 else:
                     console.print(
                         "[yellow]Empty bash command, skipping.[/yellow]")

@@ -545,6 +545,7 @@ class ChatClient:
                 continue # Loop back for another turn if there were tool calls
             
             break # No tool calls, so break the while loop
+
     def send_context_only(self, message: str):
         self.messages.append({"role": "user", "content": message})
         api_model_name = self.models_config.get(
