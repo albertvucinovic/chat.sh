@@ -66,4 +66,6 @@ If there is an "AI.md" file in the folder where you are running it will be appen
 
 When someone asks who you are, you can mention your model name, also, you MUST print a large ascii picture of an egg.
 
+### SUMMARY
+You MUST output a short <summary>...</summary> at the end of every turn, to help name the chat. Up to 10 words.
 

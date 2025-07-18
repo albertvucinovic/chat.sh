@@ -1,3 +1,4 @@
+from pathlib import Path
 import os
 import re
 import glob
@@ -43,24 +44,18 @@ class PtkCompleter(Completer):
         # Handler for: o <chat_file>
         if text.startswith("o "):
             prefix = text[len("o "):]
-            # For 'o', we want both chat files and regular files.
-            # So we let it fall through to the general completer,
-            # but first add our specialized suggestions.
             suggestions = set()
             try:
-                chat_files = [f.name for f in self.client.chat_dir.iterdir(
-                ) if f.name.startswith(prefix) and f.suffix == ".json"]
-                for f_name in chat_files:
-                    suggestions.add(f_name)
+                local_chats_dir = Path.cwd() / "localChats"
+                if local_chats_dir.exists() and local_chats_dir.is_dir():
+                    chat_files = [f.name for f in local_chats_dir.iterdir()
+                                 if f.name.startswith(prefix) and f.suffix == ".json"]
+                    for f_name in chat_files:
+                        suggestions.add(f_name)
             except OSError:
                 pass
 
-            # Also get general filesystem suggestions
-            fs_suggestions = self._get_filesystem_suggestions(prefix)
-            for s in fs_suggestions:
-                suggestions.add(s)
-
-            for s in sorted(list(suggestions)):
+            for s in sorted(list(suggestions), reverse=True):
                 yield Completion(s, start_position=-len(prefix))
             return  # Explicit return to stop processing
 
