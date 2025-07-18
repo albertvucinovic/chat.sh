@@ -40,10 +40,12 @@ class ChatClient:
         self.summary: Optional[str] = None
         self.tools = TOOLS
 
+        parent = Path(__file__).resolve().parent 
+
         try:
-            with open("models.json", "r") as f:
+            with open(parent / "models.json", "r") as f:
                 self.models_config = json.load(f)
-            with open("providers.json", "r") as f:
+            with open(parent / "providers.json", "r") as f:
                 self.providers_config = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
             self.console.print(
