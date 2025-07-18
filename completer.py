@@ -80,6 +80,18 @@ class PtkCompleter(Completer):
                 yield Completion(rel_path, start_position=-len(prefix))
             return  # Explicit return
 
+        # Handler for: /pushContext <context>
+        elif text.startswith("/pushContext "):
+            prefix = text[len("/pushContext "):]
+            # No specific completions for context, but could add common ones
+            return
+
+        # Handler for: /popContext <return_value>
+        elif text.startswith("/popContext "):
+            prefix = text[len("/popContext "):]
+            # No specific completions for return value
+            return
+
         # --- General Fallback Logic for Filesystem Paths ---
         else:
             # This logic runs for 'b ...' and any other command.

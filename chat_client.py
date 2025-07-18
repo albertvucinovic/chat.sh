@@ -7,6 +7,7 @@ import requests
 import uuid
 from pathlib import Path
 from typing import List, Dict, Optional
+import copy
 
 import tiktoken
 from rich.console import Console, Group
@@ -23,6 +24,10 @@ TOOLS = [
                                       "parameters": {"type": "object", "properties": {"script": {"type": "string"}}, "required": ["script"]}}},
     {"type": "function", "function": {"name": "python", "description": "Execute a Python script and return combined stdout/stderr.",
                                       "parameters": {"type": "object", "properties": {"script": {"type": "string"}}, "required": ["script"]}}},
+    {"type": "function", "function": {"name": "pushContext", "description": "Start a new conversation thread with given context.",
+                                      "parameters": {"type": "object", "properties": {"context": {"type": "string"}}, "required": ["context"]}}},
+    {"type": "function", "function": {"name": "popContext", "description": "End current conversation thread and return to previous context.",
+                                      "parameters": {"type": "object", "properties": {"return_value": {"type": "string"}}, "required": ["return_value"]}}},
 ]
 
 
@@ -39,6 +44,8 @@ class ChatClient:
         self.providers_config = {}
         self.summary: Optional[str] = None
         self.tools = TOOLS
+        self.context_stack = []  # Stack to store conversation contexts
+        self.original_system_prompt = ""  # Store the original system prompt
 
         parent = Path(__file__).resolve().parent 
 
@@ -53,7 +60,7 @@ class ChatClient:
 
         if self.current_model_key not in self.models_config:
             self.console.print(
-                f"[bold yellow]Warning: Initial model '{self.current_model_key}' not in models.json.[/bold yellow]")
+                f"[bold yellow]Warning: Initial model key '{self.current_model_key}' not found in models.json.[/bold yellow]")
             if self.models_config:
                 self.current_model_key = list(self.models_config.keys())[0]
             else:
@@ -80,6 +87,7 @@ class ChatClient:
                     system_prompt_content += "\nTHIS PROJECT'S INSTRUCTIONS AND RULES:\n\n" + aimd_content
         except FileNotFoundError:
             pass
+
         return system_prompt_content
 
     def _initialize_system_prompt(self):
@@ -88,6 +96,80 @@ class ChatClient:
             system_prompt_string, title="[bold cyan]System Prompt[/bold cyan]", border_style=self.get_border_style("dim")))
         self.messages: List[Dict] = [
             {"role": "system", "content": system_prompt_string}]
+        self.original_system_prompt = system_prompt_string
+
+    def push_context(self, context: str) -> str:
+        """Start a new conversation thread with the context as the first message."""
+        # Save current conversation thread to stack
+        current_thread = copy.deepcopy(self.messages[1:])  # Exclude system prompt
+        self.context_stack.append(current_thread)
+        
+        # Start new conversation thread with ONLY the context as user message
+        self.messages = [{"role": "system", "content": self.original_system_prompt}]
+        self.messages.append({"role": "user", "content": context})
+        
+        self.console.print(Panel(f"[bold green]🔄 Context Switch[/bold green]", 
+                                title="[bold]Conversation Context Changed[/bold]", 
+                                border_style="green"))
+        self.console.print(f"[dim]Started new context: {context}[/dim]")
+        self.console.print("─" * 80)
+        
+        return f"Started new conversation context: {context}"
+
+    def pop_context(self, return_value: str) -> str:
+        """End current conversation thread and return to previous context."""
+        if self.context_stack:
+            # Get the previous conversation thread
+            previous_thread = self.context_stack.pop()
+            
+            # Clear current messages and restore previous thread
+            self.messages = [{"role": "system", "content": self.original_system_prompt}]
+            self.messages.extend(previous_thread)
+            
+            # Add the pop return value as user message to the restored conversation
+            return_msg = f"Return value from push/pop context: {return_value}"
+            self.messages.append({"role": "user", "content": return_msg})
+            
+            # Show transition message
+            self.console.print(Panel(f"[bold yellow]🔄 Context Return[/bold yellow]", 
+                                    title="[bold]Returning to Previous Context[/bold]", 
+                                    border_style="yellow"))
+            self.console.print(f"[dim]Previous context restored. Return value: {return_value}[/dim]")
+            self.console.print("─" * 80)
+            
+            # Re-render the restored conversation
+            for msg in self.messages[1:]:  # Skip system prompt
+                self._render_message(msg)
+            
+            return f"Returned to previous conversation. Return value: {return_value}"
+        else:
+            # No previous context - just add the return value to current conversation
+            return_msg = f"Return value from push/pop context: {return_value}"
+            self.messages.append({"role": "user", "content": return_msg})
+            
+            self.console.print(Panel(f"[bold red]⚠️ No Previous Context[/bold red]", 
+                                    title="[bold]Context Stack Empty[/bold]", 
+                                    border_style="red"))
+            return f"No previous conversation to return to. Return value added: {return_value}"
+
+    def _render_message(self, msg: Dict) -> None:
+        """Safely render a single message."""
+        try:
+            if msg.get("role") == "user":
+                content = msg.get("content", "") or "[No content]"
+                self.console.print(Panel(
+                    content, title="[bold green]You[/bold green]", border_style="green"))
+            elif msg.get("role") == "assistant":
+                content = msg.get("content", "") or "[No content]"
+                self.console.print(Panel(
+                    content, title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"))
+            elif msg.get("role") == "tool":
+                content = msg.get("content", "") or "[No content]"
+                output_renderable = Text(content)
+                self.console.print(Panel(
+                    output_renderable, title=f"[bold green]Tool Output: {msg.get('name', 'N/A')}[/bold green]", border_style="green"))
+        except Exception as e:
+            self.console.print(f"[red]Error rendering message: {e}[/red]")
 
     def _update_provider_and_url(self):
         model_config = self.models_config.get(self.current_model_key)
@@ -233,11 +315,11 @@ class ChatClient:
         fn_name = call["function"]["name"]
         try:
             args = json.loads(call["function"].get("arguments", "{}") or "{}")
-            script = args.get("script", "")
         except json.JSONDecodeError:
             self.messages.append({"role": "tool", "name": fn_name,
                                  "tool_call_id": call["id"], "content": "Error: Invalid arguments."})
             return
+        
         try:
             execute = confirm(f"Execute the {fn_name} tool call shown above?")
         except (EOFError, KeyboardInterrupt):
@@ -247,8 +329,18 @@ class ChatClient:
             self.console.print("[yellow]Skipped by user.[/yellow]")
         else:
             self.console.print("[cyan]Executing...[/cyan]")
-            output = run_bash_script(
-                script) if fn_name == "bash" else run_python_script(script)
+            
+            if fn_name == "bash":
+                output = run_bash_script(args.get("script", ""))
+            elif fn_name == "python":
+                output = run_python_script(args.get("script", ""))
+            elif fn_name == "pushContext":
+                output = self.push_context(args.get("context", ""))
+            elif fn_name == "popContext":
+                output = self.pop_context(args.get("return_value", ""))
+            else:
+                output = f"Unknown tool: {fn_name}"
+                
             self.console.print(Panel(Text(
                 output), title="[bold green]Execution Output[/bold green]", border_style="green"))
         self.messages.append(
@@ -301,6 +393,9 @@ class ChatClient:
 
             # Clear the current messages and replace them
             self.messages.clear()
+            # Reset conversation stack when loading a new chat
+            self.context_stack.clear()
+            
             # Render the loaded messages
             for msg in loaded_messages:
                 self.messages.append(msg)  # Always append to history first
@@ -326,7 +421,7 @@ class ChatClient:
                                     args or '{}').get('script', args)
                                 renderables.append(Panel(Syntax(script, name, theme="monokai", line_numbers=self.borders_enabled),
                                                    title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
-                            except (json.JSONDecodeError, AttributeError):
+                            except (jsonJSONDecodeError, AttributeError):
                                 renderables.append(Panel(Text(
                                     args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
                     if renderables:

@@ -84,7 +84,9 @@ def main():
     console.print(
         Panel(
             "Chat started. [bold]Tab[/bold] to autocomplete, [bold]Right Arrow[/bold] to accept.\n"
-            "[bold]Ctrl+D[/bold] to submit. [bold]Ctrl+B[/bold] for borders. [bold]Ctrl+E[/bold] to clear. [bold]Ctrl+C[/bold] to exit.",
+            "[bold]Ctrl+D[/bold] to submit. [bold]Ctrl+B[/bold] for borders. [bold]Ctrl+E[/bold] to clear. [bold]Ctrl+C[/bold] to exit.\n"
+            "[bold]/pushContext <context>[/bold] - Push current context and set new one.\n"
+            "[bold]/popContext <return_value>[/bold] - Pop context from stack.\n",
             title="[bold]Welcome[/bold]",
             border_style=client.get_border_style("magenta")
         )
@@ -119,7 +121,7 @@ def main():
                         console.print(output_renderable)
                     context_message = (
                         "User executed a local command.\n"
-                        f"Command:\n```bash\n{script_to_run}\n```\n\n"
+                        f"Command:\n\`\`\`bash\n{script_to_run}\n\`\`\`\n\n"
                         f"Output:\n---\n{output}\n---"
                     )
                     client.send_context_only(context_message)
@@ -162,6 +164,26 @@ def main():
             elif user_input.startswith("/model"):
                 model_key = user_input[len("/model"):].strip()
                 client.switch_model(model_key)
+                continue
+
+            elif user_input.startswith("/pushContext"):
+                context = user_input[len("/pushContext"):].strip()
+                if context:
+                    result = client.push_context(context)
+                    console.print(Panel(
+                        result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan"))
+                else:
+                    console.print("[yellow]Usage: /pushContext <new_context>[/yellow]")
+                continue
+
+            elif user_input.startswith("/popContext"):
+                return_value = user_input[len("/popContext"):].strip()
+                if return_value:
+                    result = client.pop_context(return_value)
+                    console.print(Panel(
+                        result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan"))
+                else:
+                    console.print("[yellow]Usage: /popContext <return_value>[/yellow]")
                 continue
 
             client.send_message(user_input)
