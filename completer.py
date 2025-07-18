@@ -1,7 +1,7 @@
 import os
 import re
 import glob
-from typing import Iterable, List, Set
+from typing import Iterable, List
 
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
@@ -12,50 +12,70 @@ class ChatClient:
 
 
 class PtkCompleter(Completer):
-    WORD_DELIMITERS = " `~!@#$%^&*()=+[{]}|;:'\",<>"
-
     def __init__(self, client: "ChatClient"):
         self.client = client
-        self.word_regex = re.compile(
-            r"[^\s" + re.escape(self.WORD_DELIMITERS) + "]+")
 
     def _get_filesystem_suggestions(self, prefix: str) -> List[str]:
+        """Provides filesystem suggestions for a given prefix, handling '~'."""
         try:
             expanded_prefix = os.path.expanduser(prefix)
             matches = glob.glob(expanded_prefix + '*')
-            return [f"{m}/" if os.path.isdir(m) else m for m in matches]
+            suggestions = []
+            for match in matches:
+                normalized_match = match.replace('\\', '/')
+                if os.path.isdir(normalized_match):
+                    suggestions.append(normalized_match + '/')
+                else:
+                    suggestions.append(normalized_match)
+            return suggestions
         except (OSError, PermissionError):
             return []
 
     def get_completions(self, document: Document, complete_event) -> Iterable[Completion]:
-        text_before_cursor = document.text_before_cursor
-        word_before_cursor = document.get_word_before_cursor(
-            pattern=self.word_regex)
+        """
+        The main completion logic, structured as a clear if/elif/else chain
+        to ensure only one completion type is active at a time.
+        """
+        text = document.text_before_cursor
 
-        # --- Command: o <chat_file> ---
-        if text_before_cursor.startswith("o "):
-            prefix = text_before_cursor[len("o "):]
+        # --- Command-Specific Handlers ---
+
+        # Handler for: o <chat_file>
+        if text.startswith("o "):
+            prefix = text[len("o "):]
+            # For 'o', we want both chat files and regular files.
+            # So we let it fall through to the general completer,
+            # but first add our specialized suggestions.
+            suggestions = set()
             try:
-                files = [f.name for f in self.client.chat_dir.iterdir(
-                ) if f.suffix == ".json" and f.name.startswith(prefix)]
-                for f in sorted(files, reverse=True):
-                    yield Completion(f, start_position=-len(prefix))
+                chat_files = [f.name for f in self.client.chat_dir.iterdir(
+                ) if f.name.startswith(prefix) and f.suffix == ".json"]
+                for f_name in chat_files:
+                    suggestions.add(f_name)
             except OSError:
                 pass
-            return
 
-        # --- Command: /model <model_key> ---
-        if text_before_cursor.startswith("/model "):
-            prefix = text_before_cursor[len("/model "):]
-            model_keys = self.client.models_config.keys()
-            for name in model_keys:
-                if name.startswith(prefix):
-                    yield Completion(name, start_position=-len(prefix))
-            return
+            # Also get general filesystem suggestions
+            fs_suggestions = self._get_filesystem_suggestions(prefix)
+            for s in fs_suggestions:
+                suggestions.add(s)
 
-        # --- Command: /global/ <command_file> ---
-        if text_before_cursor.startswith("/global/"):
-            prefix = text_before_cursor[len("/global/"):]
+            for s in sorted(list(suggestions)):
+                yield Completion(s, start_position=-len(prefix))
+            return  # Explicit return to stop processing
+
+        # Handler for: /model <model_key>
+        elif text.startswith("/model "):
+            prefix = text[len("/model "):]
+            if self.client.models_config:
+                for name in self.client.models_config.keys():
+                    if name.startswith(prefix):
+                        yield Completion(name, start_position=-len(prefix))
+            return  # Explicit return
+
+        # Handler for: /global/ <command_file>
+        elif text.startswith("/global/"):
+            prefix = text[len("/global/"):]
             script_dir = os.path.dirname(os.path.realpath(__file__))
             global_dir = os.path.join(script_dir, 'global_commands')
             search_path = os.path.join(global_dir, prefix)
@@ -63,20 +83,27 @@ class PtkCompleter(Completer):
             for s in suggestions:
                 rel_path = os.path.relpath(s, global_dir).replace('\\', '/')
                 yield Completion(rel_path, start_position=-len(prefix))
-            return
+            return  # Explicit return
 
-        # --- Fallback: General Filesystem Path Completion ---
-        if word_before_cursor:
-            suggestions = self._get_filesystem_suggestions(word_before_cursor)
+        # --- General Fallback Logic for Filesystem Paths ---
+        else:
+            # This logic runs for 'b ...' and any other command.
+            parts = text.split()
+            if not parts:
+                return  # Nothing to complete
+
+            # If the line ends with a space, the user has finished a word.
+            # We could offer suggestions for the current directory, but for now we'll do nothing.
+            if text.endswith(' '):
+                return
+
+            prefix_to_complete = parts[-1]
+            suggestions = self._get_filesystem_suggestions(prefix_to_complete)
+
+            # This is the crucial fix for the "toggling" bug:
+            # Do not suggest the prefix itself if it's the only option and no changes are made.
+            if len(suggestions) == 1 and suggestions[0].lower() == prefix_to_complete.lower():
+                return
+
             for s in suggestions:
-                yield Completion(s, start_position=-len(word_before_cursor))
-            return
-
-        # --- Default: Filesystem path completion ---
-        if os.path.sep in text_before_cursor or text_before_cursor.startswith(('.', '/')):
-            for s in self._get_filesystem_suggestions(text_before_cursor):
-                yield Completion(s, start_position=0)
-            return
-
-        # Fallback to word completion from history (if implemented)
-        # For now, this is a placeholder.
+                yield Completion(s, start_position=-len(prefix_to_complete))
