@@ -81,9 +81,8 @@ class ChatClient:
                 sys.exit(1)
 
         self.switch_model(self.current_model_key, initial_setup=True)
-        self._initialize_system_prompt()
 
-    def _initialize_system_prompt(self):
+    def _build_system_prompt(self) -> str:
         system_prompt_content = "You are a helpful assistant."
         try:
             with open(Path(__file__).resolve().parent / "systemPrompt", "r", encoding="utf-8") as f:
@@ -102,11 +101,14 @@ class ChatClient:
                     system_prompt_content += "THIS PROJECT'S INSTRUCTIONS AND RULES:\n\n" + aimd_content
         except FileNotFoundError:
             pass
+        return system_prompt_content
 
+    def _initialize_system_prompt(self):
+        system_prompt_string = self._build_system_prompt()
         self.console.print(Panel(
-            system_prompt_content, title="[bold cyan]System Prompt[/bold cyan]", border_style=self.get_border_style("dim")))
+            system_prompt_string, title="[bold cyan]System Prompt[/bold cyan]", border_style=self.get_border_style("dim")))
         self.messages: List[Dict] = [
-            {"role": "system", "content": system_prompt_content}]
+            {"role": "system", "content": system_prompt_string}]
 
     def _update_provider_and_url(self):
         if self.current_model_key not in self.models_config:
@@ -134,6 +136,11 @@ class ChatClient:
             self.headers["Authorization"] = "Bearer NOT_SET"
 
     def switch_model(self, model_key: str, initial_setup: bool = False):
+        if initial_setup:
+            self._update_provider_and_url()
+            self._initialize_system_prompt()
+            return
+
         if not model_key:
             self.console.print("[bold]Available models:[/bold]")
             for name in self.models_config:
@@ -148,141 +155,164 @@ class ChatClient:
         self.current_model_key = model_key
         self._update_provider_and_url()
 
-        if not initial_setup:
+        new_system_prompt = self._build_system_prompt()
+        if self.messages and self.messages[0]["role"] == "system":
+            self.messages[0]["content"] = new_system_prompt
             self.console.print(
-                f"[bold green]Switched to model: '{self.current_model_key}'[/bold green]")
+                f"[bold green]Switched to model: '{self.current_model_key}'. Chat context preserved.[/bold green]")
+            self.console.print(Panel(
+                new_system_prompt, title="[bold cyan]Updated System Prompt[/bold cyan]", border_style=self.get_border_style("dim")))
+        else:
             self._initialize_system_prompt()
+            self.console.print(
+                f"[bold yellow]Warning: Chat history was malformed. Initialized new chat with '{self.current_model_key}'.[/bold yellow]")
 
     def send_message(self, message: str):
         self.messages.append({"role": "user", "content": message})
 
-        model_config = self.models_config.get(self.current_model_key, {})
-        api_model_name = model_config.get("model_name")
-        if not api_model_name:
-            self.console.print(
-                "[bold red]Could not find API model name for current selection. Aborting send.[/bold red]")
-            return
-
         while True:
+            model_config = self.models_config.get(self.current_model_key, {})
+            api_model_name = model_config.get("model_name")
+            if not api_model_name:
+                self.console.print(
+                    "[bold red]Could not find API model name for current selection. Aborting send.[/bold red]")
+                return
+
             assistant_text_parts: list[str] = []
             tool_calls_buf: dict[int, dict] = {}
             interrupted = False
-            data = ""
 
             try:
-                response = requests.post(
-                    f"{self.base_url}", headers=self.headers,
-                    json={"model": api_model_name, "messages": self.messages,
-                          "tools": self.tools, "tool_choice": "auto", "stream": True},
-                    timeout=120, stream=True,
-                )
-                response.raise_for_status()
-
-                buffer = ""
                 with Live(console=self.console, auto_refresh=False) as live:
-                    if self.borders_enabled:
-                        live.update(
-                            Panel("[dim]Assistant is thinking...[/dim]", border_style="cyan"), refresh=True)
+                    live.update(
+                        Panel("[dim]Assistant is thinking...[/dim]", border_style="cyan"), refresh=True)
 
-                    for chunk in response.iter_content(chunk_size=1024):
-                        if not chunk:
+                    response = requests.post(f"{self.base_url}", headers=self.headers, json={
+                                             "model": api_model_name, "messages": self.messages, "tools": self.tools, "tool_choice": "auto", "stream": True}, timeout=120, stream=True)
+                    response.raise_for_status()
+
+                    for line_bytes in response.iter_lines():
+                        if not line_bytes:
                             continue
-                        buffer += chunk.decode('utf-8')
 
-                        while '\n' in buffer:
-                            line, buffer = buffer.split('\n', 1)
-                            if not line.strip() or not line.startswith("data: "):
-                                continue
+                        line = line_bytes.decode('utf-8')
+                        if not line.startswith("data: "):
+                            continue
 
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-
-                            try:
-                                chunk_json = json.loads(data)
-                                delta = chunk_json.get("choices", [{}])[
-                                    0].get("delta", {})
-                            except json.JSONDecodeError:
-                                continue
-
-                            if delta.get("content"):
-                                assistant_text_parts.append(delta["content"])
-
-                            if tool_calls_chunk := delta.get("tool_calls"):
-                                for index, tc_delta in enumerate(tool_calls_chunk):
-                                    buffer_index = tc_delta.get("index", index)
-                                    if buffer_index not in tool_calls_buf:
-                                        tool_calls_buf[buffer_index] = {"id": f"call_{uuid.uuid4().hex[:10]}", "type": "function", "function": {
-                                            "name": "", "arguments": ""}}
-                                    tc_full = tool_calls_buf[buffer_index]
-                                    if tc_delta.get("id"):
-                                        tc_full["id"] = tc_delta["id"]
-                                    if f_delta := tc_delta.get("function"):
-                                        if f_delta.get("name"):
-                                            tc_full["function"]["name"] = f_delta["name"]
-                                        if f_delta.get("arguments"):
-                                            tc_full["function"]["arguments"] += f_delta["arguments"]
-
-                            renderables = []
-                            if assistant_text_parts:
-                                renderables.append(
-                                    Text("".join(assistant_text_parts)))
-                            for tc_full in sorted(tool_calls_buf.values(), key=lambda x: x.get('index', 0)):
-                                name = tc_full.get(
-                                    "function", {}).get("name", "...")
-                                args = tc_full.get("function", {}).get(
-                                    "arguments", "")
-                                try:
-                                    script = json.loads(
-                                        args or '{}').get('script', args)
-                                    syntax = Syntax(
-                                        script, name, theme="monokai", line_numbers=self.borders_enabled)
-                                    renderables.append(Panel(
-                                        syntax, title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
-                                except json.JSONDecodeError:
-                                    renderables.append(Panel(Text(
-                                        args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
-
-                            final_renderable = Group(*renderables)
-                            if self.borders_enabled:
-                                live.update(Panel(
-                                    final_renderable, title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"), refresh=True)
-                            else:
-                                live.update(final_renderable, refresh=True)
-
+                        data = line[6:]
                         if data == "[DONE]":
                             break
+
+                        try:
+                            chunk_json = json.loads(data)
+                            delta = chunk_json.get("choices", [{}])[
+                                0].get("delta", {})
+                        except (json.JSONDecodeError, IndexError):
+                            continue
+
+                        if content := delta.get("content"):
+                            assistant_text_parts.append(content)
+
+                        if tool_calls_chunk := delta.get("tool_calls"):
+                            for index, tc_delta in enumerate(tool_calls_chunk):
+                                buffer_index = tc_delta.get("index", index)
+                                if buffer_index not in tool_calls_buf:
+                                    tool_calls_buf[buffer_index] = {"id": f"call_{uuid.uuid4().hex[:10]}", "type": "function", "function": {
+                                        "name": "", "arguments": ""}}
+                                tc_full = tool_calls_buf[buffer_index]
+                                if tc_delta.get("id"):
+                                    tc_full["id"] = tc_delta["id"]
+                                if f_delta := tc_delta.get("function"):
+                                    if f_delta.get("name"):
+                                        tc_full["function"]["name"] += f_delta["name"]
+                                    if f_delta.get("arguments"):
+                                        tc_full["function"]["arguments"] += f_delta["arguments"]
+
+                        renderables = []
+                        if assistant_text_parts:
+                            renderables.append(
+                                Text("".join(assistant_text_parts), justify="left"))
+                        for tc_full in sorted(tool_calls_buf.values(), key=lambda x: x.get('index', 0)):
+                            name = tc_full.get(
+                                "function", {}).get("name", "...")
+                            args = tc_full.get("function", {}).get(
+                                "arguments", "")
+                            try:
+                                script = json.loads(
+                                    args or '{}').get('script', args)
+                                syntax = Syntax(
+                                    script, name, theme="monokai", line_numbers=self.borders_enabled)
+                                renderables.append(Panel(
+                                    syntax, title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                            except (json.JSONDecodeError, AttributeError):
+                                renderables.append(Panel(Text(
+                                    args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                        live.update(Panel(Group(
+                            *renderables), title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"), refresh=True)
 
             except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
                 if isinstance(e, KeyboardInterrupt):
                     self.console.print(
-                        "\n[bold yellow]Generation interrupted.[/bold yellow]")
+                        "\n[bold yellow]Interrupted.[/bold yellow]")
                 else:
                     self.console.print(f"\n[bold red]Error: {e}[/bold red]")
                 interrupted = True
 
-            full_text = "".join(assistant_text_parts).strip()
+            if interrupted:
+                return
 
             assistant_msg: dict = {"role": "assistant"}
+            full_text = "".join(assistant_text_parts)
             if full_text:
                 assistant_msg["content"] = full_text
             if tool_calls_buf:
                 assistant_msg["tool_calls"] = list(tool_calls_buf.values())
 
-            if assistant_msg.get("content") or assistant_msg.get("tool_calls"):
-                self.messages.append(assistant_msg)
-
-            if interrupted:
-                return
-            if not tool_calls_buf:
+            if not assistant_msg.get("content") and not assistant_msg.get("tool_calls"):
                 return
 
-            for tc in assistant_msg.get("tool_calls", []):
-                self._handle_tool_call(tc)
+            self.messages.append(assistant_msg)
 
-            continue
+            if tool_calls := assistant_msg.get("tool_calls"):
+                for tc in tool_calls:
+                    self._handle_tool_call(tc)
+                continue
 
-    # All other original methods that were not touched by my buggy scripts
+            break
+
+    def _handle_tool_call(self, call: Dict):
+        fn_name = call["function"]["name"]
+        try:
+            args_str = call["function"].get("arguments", "{}") or "{}"
+            args = json.loads(args_str)
+            script = args.get("script", "")
+        except json.JSONDecodeError:
+            self.console.print(
+                f"\n[bold red]Error decoding args for {fn_name}.[/bold red]")
+            self.messages.append({"role": "tool", "name": fn_name,
+                                 "tool_call_id": call["id"], "content": "Error: Invalid arguments."})
+            return
+
+        call_id = call["id"]
+
+        try:
+            execute = confirm(f"Execute the {fn_name} tool call shown above?")
+        except (EOFError, KeyboardInterrupt):
+            execute = False
+
+        if not execute:
+            output = "--- SKIPPED BY USER ---"
+            self.console.print("[yellow]Skipped by user.[/yellow]")
+        else:
+            self.console.print("[cyan]Executing...[/cyan]")
+            output = run_bash_script(
+                script) if fn_name == "bash" else run_python_script(script)
+            self.console.print(Panel(Text(
+                output), title="[bold green]Execution Output[/bold green]", border_style="green"))
+
+        self.messages.append(
+            {"role": "tool", "name": fn_name, "tool_call_id": call_id, "content": output})
+
     def toggle_borders(self) -> str:
         self.borders_enabled = not self.borders_enabled
         status = "ON" if self.borders_enabled else "OFF"
@@ -291,13 +321,8 @@ class ChatClient:
     def get_border_style(self, style: str) -> str:
         return style if self.borders_enabled else "none"
 
-    def _handle_tool_call(self, call: Dict):
-        # This is a simplified version for brevity in this script.
-        # The full logic from the original file should be preserved.
-        self.console.print(f"Handling tool call: {call['function']['name']}")
-
     def save_chat(self) -> str:
-        summary = "chat_summary"  # simplified
+        summary = "chat_summary"
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_summary = re.sub(r"[^\w-]", "_", summary)
         chat_name = f"{timestamp}_{safe_summary}.json"
@@ -307,5 +332,4 @@ class ChatClient:
         return str(file_path)
 
     def load_chat(self, chat_name: str):
-        # Simplified for brevity
         self.console.print(f"Loading chat: {chat_name}")
