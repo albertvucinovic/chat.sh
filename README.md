@@ -1,7 +1,9 @@
 # Egg: An Extensible AI Chat Terminal
 
 Egg is a powerful, terminal-based chat application designed for developers and power users. It supports multiple AI models, providers, tool use, and a range of quality-of-life features to make interacting with AI assistants fast and efficient.
-n![Egg](egg.gif)
+
+
+![Egg](egg.gif)
 
 
 ## Features
