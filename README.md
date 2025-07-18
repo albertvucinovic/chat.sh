@@ -21,6 +21,7 @@ Egg is a powerful, terminal-based chat application designed for developers and p
     - Optional UI borders for a cleaner look.
 - **Shortcuts for Efficiency**:
     - `Tab`: Autocomplete commands and paths.
+    - `Right Arrow`: Accept autocompletion suggestions.
     - `Ctrl+D`: Submit your message.
     - `Ctrl+C`: Exit the application or interrupt the AI's response.
     - `Ctrl+B`: Toggle UI borders on/off.
@@ -28,6 +29,29 @@ Egg is a powerful, terminal-based chat application designed for developers and p
 - **Chat Management**:
     - Save and load chat sessions.
     - Execute local bash commands directly from the prompt.
+- **Memory System**: Persistent storage for context and useful information across sessions.
+- **Command System**: Extensible command system with local and global commands.
+
+## File Structure
+
+```
+chat.sh/
+├── chat.py              # Main application entry point
+├── chat_client.py       # Core chat client logic
+├── completer.py         # Autocompletion system
+├── executors.py         # Tool execution handlers
+├── input_handler.py     # Input processing utilities
+├── models.json          # Model definitions
+├── providers.json       # API provider configuration
+├── systemPrompt         # Base system prompt for AI
+├── requirements.txt     # Python dependencies
+├── chat.sh            # Launcher script
+├── AI.md               # Project-specific directives for Egg
+├── commands/           # Local command definitions
+├── global_commands/    # Global command definitions
+├── localChats/        # Saved chat sessions
+└── memory/            # Persistent storage directory
+```
 
 ## Setup
 
@@ -92,7 +116,50 @@ Run the application with the `chat.sh` script:
   - Typing `/model ` and hitting `Tab` will show available models.
 
 - **o `<chat_file_name>`**: Open (load) a previously saved chat session from the `localChats/` directory.
+  - Supports autocompletion - type `o ` and hit `Tab` to see available chats.
 
 - **b `<command>`**: Execute a local bash command and inject the output into the conversation history as context.
   - Example: `b ls -l`
 
+- **/global/<command>**: Execute global commands from the global_commands directory.
+  - Supports autocompletion for available commands.
+
+### Advanced Features
+
+- **Memory System**: The assistant can store and retrieve information across sessions using the memory system.
+- **Command Extensions**: Add custom functionality by creating new command files in the commands/ or global_commands/ directories.
+- **Context Preservation**: Chat history and context persist across model switches and sessions.
+- **Tool Integration**: The assistant can use bash and python tools to help with tasks, with user confirmation for security.
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| Tab | Autocomplete commands and file paths |
+| Right Arrow | Accept autocompletion suggestion |
+| Ctrl+D | Submit message |
+| Ctrl+C | Exit application or interrupt response |
+| Ctrl+B | Toggle UI borders on/off |
+| Ctrl+E | Clear current input line |
+
+## Configuration Files
+
+- **AI.md**: Contains project-specific directives and instructions for Egg (this AI assistant)
+- **systemPrompt**: The base system prompt sent to all AI models
+- **models.json**: Model definitions and configurations
+- **providers.json**: API endpoint configurations
+
+## Development
+
+The application is built with Python 3.7+ and uses:
+- `prompt_toolkit` for terminal UI and autocompletion
+- `rich` for rich text formatting
+- `requests` for HTTP API calls
+- JSON for configuration files
+
+## Troubleshooting
+
+- Ensure all required environment variables are set
+- Check that models.json and providers.json are valid JSON
+- Verify API endpoints are accessible
+- Use `b ls localChats/` to see available saved chats
