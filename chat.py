@@ -85,15 +85,20 @@ def main():
         Panel(
             "Chat started. [bold]Tab[/bold] to autocomplete, [bold]Right Arrow[/bold] to accept.\n"
             "[bold]Ctrl+D[/bold] to submit. [bold]Ctrl+B[/bold] for borders. [bold]Ctrl+E[/bold] to clear. [bold]Ctrl+C[/bold] to exit.\n"
-            "[bold]/pushContext <context>[/bold] - Push current context and set new one.\n"
-            "[bold]/popContext <return_value>[/bold] - Pop context from stack.\n",
+            "[bold]/pushContext <context>[/bold] - Push current chat and start new context.\n"
+            "[bold]/popContext <return_value>[/bold] - Pop context from stack and return to previous.\n",
             title="[bold]Welcome[/bold]",
             border_style=client.get_border_style("magenta")
         )
     )
 
     def shutdown():
-        """Saves the chat and exits cleanly."""
+        """
+        Saves the chat and exits cleanly.
+        Note: Context stack management is handled within ChatClient methods
+        (push_context/pop_context) which save specific sub-contexts.
+        This save_chat is for the root level or final state.
+        """
         console.print(
             "\n\n[bold yellow]Saving chat and exiting...[/bold yellow]")
         saved_path = client.save_chat()
@@ -109,6 +114,7 @@ def main():
                 continue
 
             elif user_input.startswith("b "):
+                client.messages.append({"role": "user", "content": user_input}) # Add command to history
                 console.print("\n[cyan]Executing local command...[/cyan]")
                 script_to_run = user_input[2:].strip()
                 if script_to_run:
@@ -124,13 +130,16 @@ def main():
                         f"Command:\n\`\`\`bash\n{script_to_run}\n\`\`\`\n\n"
                         f"Output:\n---\n{output}\n---"
                     )
-                    client.send_context_only(context_message)
+                    # send_context_only is for sending info to LLM without expecting a response
+                    # This is already handled as a tool output, no need to send again as user message context
+                    # client.send_context_only(context_message)
                 else:
                     console.print(
                         "[yellow]Empty bash command, skipping.[/yellow]")
                 continue
 
             elif user_input.startswith("o "):
+                client.messages.append({"role": "user", "content": user_input}) # Add command to history
                 chat_name = user_input[2:].strip()
                 if chat_name:
                     client.load_chat(chat_name)
@@ -139,6 +148,7 @@ def main():
                 continue
 
             elif user_input.startswith("/global/"):
+                client.messages.append({"role": "user", "content": user_input}) # Add command to history
                 command_file = user_input[len("/global/"):].strip()
                 if not command_file.endswith(".md"):
                     command_file += ".md"
@@ -162,11 +172,13 @@ def main():
                 continue
 
             elif user_input.startswith("/model"):
+                client.messages.append({"role": "user", "content": user_input}) # Add command to history
                 model_key = user_input[len("/model"):].strip()
                 client.switch_model(model_key)
                 continue
 
             elif user_input.startswith("/pushContext"):
+                client.messages.append({"role": "user", "content": user_input}) # Add command to history
                 context = user_input[len("/pushContext"):].strip()
                 if context:
                     result = client.push_context(context)
@@ -177,6 +189,7 @@ def main():
                 continue
 
             elif user_input.startswith("/popContext"):
+                client.messages.append({"role": "user", "content": user_input}) # Add command to history
                 return_value = user_input[len("/popContext"):].strip()
                 if return_value:
                     result = client.pop_context(return_value)

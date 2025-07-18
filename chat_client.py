@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from typing import List, Dict, Optional
 import copy
+import shutil
 
 import tiktoken
 from rich.console import Console, Group
@@ -24,9 +25,9 @@ TOOLS = [
                                       "parameters": {"type": "object", "properties": {"script": {"type": "string"}}, "required": ["script"]}}},
     {"type": "function", "function": {"name": "python", "description": "Execute a Python script and return combined stdout/stderr.",
                                       "parameters": {"type": "object", "properties": {"script": {"type": "string"}}, "required": ["script"]}}},
-    {"type": "function", "function": {"name": "pushContext", "description": "Start a new conversation thread with given context.",
+    {"type": "function", "function": {"name": "pushContext", "description": "Save current chat and start new context conversation.",
                                       "parameters": {"type": "object", "properties": {"context": {"type": "string"}}, "required": ["context"]}}},
-    {"type": "function", "function": {"name": "popContext", "description": "End current conversation thread and return to previous context.",
+    {"type": "function", "function": {"name": "popContext", "description": "Save current chat and restore previous context conversation.",
                                       "parameters": {"type": "object", "properties": {"return_value": {"type": "string"}}, "required": ["return_value"]}}},
 ]
 
@@ -44,7 +45,7 @@ class ChatClient:
         self.providers_config = {}
         self.summary: Optional[str] = None
         self.tools = TOOLS
-        self.context_stack = []  # Stack to store conversation contexts
+        self.context_stack = []  # Stack to store saved chat filenames
         self.original_system_prompt = ""  # Store the original system prompt
 
         parent = Path(__file__).resolve().parent 
@@ -98,62 +99,117 @@ class ChatClient:
             {"role": "system", "content": system_prompt_string}]
         self.original_system_prompt = system_prompt_string
 
-    def push_context(self, context: str) -> str:
-        """Start a new conversation thread with the context as the first message."""
-        # Save current conversation thread to stack
-        current_thread = copy.deepcopy(self.messages[1:])  # Exclude system prompt
-        self.context_stack.append(current_thread)
+    def _clear_display(self):
+        """Clear the display using ANSI codes."""
+        self.console.print("\033[2J\033[H", end="")
+
+    def _save_chat_messages_to_file(self, messages_to_save: List[Dict], file_prefix: str, identifier: str = "") -> str:
+        """Saves an arbitrary list of messages to a file and returns the path."""
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_identifier = re.sub(r"[^\w-]", "_", identifier[:30]) if identifier else ""
         
-        # Start new conversation thread with ONLY the context as user message
+        if safe_identifier:
+            file_name = f"{timestamp}_{file_prefix}_{safe_identifier}.json"
+        else:
+            file_name = f"{timestamp}_{file_prefix}.json"
+            
+        file_path = self.chat_dir / file_name
+        
+        with open(file_path, "w") as f:
+            json.dump(messages_to_save, f, indent=2)
+            
+        return str(file_path)
+
+    def push_context(self, context: str) -> str:
+        """Save current chat and start completely fresh context."""
+        # Save current chat (the conversation before the push)
+        saved_file_path = self._save_chat_messages_to_file(self.messages, "pushed_context", context)
+        self.context_stack.append(saved_file_path)
+        
+        # Clear display completely
+        self._clear_display()
+        
+        # Start completely fresh conversation for the LLM
         self.messages = [{"role": "system", "content": self.original_system_prompt}]
         self.messages.append({"role": "user", "content": context})
         
-        self.console.print(Panel(f"[bold green]🔄 Context Switch[/bold green]", 
-                                title="[bold]Conversation Context Changed[/bold]", 
-                                border_style="green"))
-        self.console.print(f"[dim]Started new context: {context}[/dim]")
-        self.console.print("─" * 80)
+        # Render the new, clean context display (only system prompt and the initial context message)
+        self.console.print(Panel(
+            self.original_system_prompt, title="[bold cyan]System Prompt[/bold cyan]", border_style=self.get_border_style("dim")))
+        self.console.print(Panel(
+            context, title="[bold green]You (New Context)[/bold green]", border_style="green"))
         
-        return f"Started new conversation context: {context}"
+        self.console.print(Panel(f"[bold green]⬇️ Context Pushed[/bold green]", 
+                                title="[bold]Entering New Context[/bold]", 
+                                border_style="green"))
+        self.console.print(f"[dim]Previous context saved to: {Path(saved_file_path).name}[/dim]")
+        
+        return f"Entered new context: {context}"
 
     def pop_context(self, return_value: str) -> str:
-        """End current conversation thread and return to previous context."""
-        if self.context_stack:
-            # Get the previous conversation thread
-            previous_thread = self.context_stack.pop()
+        """Save current chat, restore previous context, and add return value."""
+        # Save current (sub)chat before popping
+        current_sub_context_file = self._save_chat_messages_to_file(self.messages, "popped_context", return_value)
+
+        if not self.context_stack:
+            # If stack is empty, just clear display and show return value in root conversation
+            self._clear_display()
             
-            # Clear current messages and restore previous thread
             self.messages = [{"role": "system", "content": self.original_system_prompt}]
-            self.messages.extend(previous_thread)
+            self.messages.append({"role": "user", "content": f"Return value from push/pop context: {return_value}"})
             
-            # Add the pop return value as user message to the restored conversation
-            return_msg = f"Return value from push/pop context: {return_value}"
-            self.messages.append({"role": "user", "content": return_msg})
-            
-            # Show transition message
-            self.console.print(Panel(f"[bold yellow]🔄 Context Return[/bold yellow]", 
-                                    title="[bold]Returning to Previous Context[/bold]", 
-                                    border_style="yellow"))
-            self.console.print(f"[dim]Previous context restored. Return value: {return_value}[/dim]")
-            self.console.print("─" * 80)
-            
-            # Re-render the restored conversation
-            for msg in self.messages[1:]:  # Skip system prompt
-                self._render_message(msg)
-            
-            return f"Returned to previous conversation. Return value: {return_value}"
-        else:
-            # No previous context - just add the return value to current conversation
-            return_msg = f"Return value from push/pop context: {return_value}"
-            self.messages.append({"role": "user", "content": return_msg})
-            
-            self.console.print(Panel(f"[bold red]⚠️ No Previous Context[/bold red]", 
-                                    title="[bold]Context Stack Empty[/bold]", 
+            self.console.print(Panel(
+                self.original_system_prompt, title="[bold cyan]System Prompt[/bold cyan]", border_style=self.get_border_style("dim")))
+            self.console.print(Panel(
+                f"Return value from push/pop context: {return_value}", 
+                title="[bold green]You[/bold green]", border_style="green"))
+            self.console.print(Panel(f"[bold red]⬆️ Context Pop (Stack Empty)[/bold red]", 
+                                    title="[bold]No Previous Context Found[/bold]", 
                                     border_style="red"))
-            return f"No previous conversation to return to. Return value added: {return_value}"
+            self.console.print(f"[dim]Current conversation saved: {Path(current_sub_context_file).name}[/dim]")
+            return f"No previous context to return to. Return value: {return_value}"
+        
+        # Get the previous chat file from the stack
+        previous_context_file = self.context_stack.pop()
+        
+        # Clear display completely before rendering new content
+        self._clear_display()
+        
+        # Load the previous conversation (which includes the original system prompt and the pushContext call)
+        try:
+            with open(previous_context_file, "r") as f:
+                restored_messages = json.load(f)
+            self.messages = restored_messages
+            
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            self.console.print(f"[bold red]Error loading previous context: {e}[/bold red]")
+            # Fallback to a clean state if loading fails
+            self.messages = [{"role": "system", "content": self.original_system_prompt}]
+
+        # Add the return value as a user message to the restored conversation
+        return_msg_content = f"Return value from push/pop context: {return_value}"
+        self.messages.append({"role": "user", "content": return_msg_content})
+        
+        # Re-render the entire restored conversation
+        for msg in self.messages:
+            if msg.get("role") == "system":
+                # Only render the initial system prompt, not subsequent ones if any were saved
+                if self.messages.index(msg) == 0: 
+                    self.console.print(Panel(
+                        msg["content"], title="[bold cyan]System Prompt[/bold cyan]", border_style=self.get_border_style("dim")))
+            else:
+                self._render_message(msg)
+        
+        self.console.print(Panel(f"[bold yellow]⬆️ Context Popped[/bold yellow]", 
+                                title="[bold]Returning to Previous Context[/bold]", 
+                                border_style="yellow"))
+        self.console.print(f"[dim]Current sub-context saved: {Path(current_sub_context_file).name}[/dim]")
+        self.console.print(f"[dim]Restored from: {Path(previous_context_file).name}[/dim]")
+        
+        return f"Restored previous context. Return value: {return_value}"
 
     def _render_message(self, msg: Dict) -> None:
-        """Safely render a single message."""
+        """Safely render a single message, excluding system messages after the initial one."""
         try:
             if msg.get("role") == "user":
                 content = msg.get("content", "") or "[No content]"
@@ -161,10 +217,32 @@ class ChatClient:
                     content, title="[bold green]You[/bold green]", border_style="green"))
             elif msg.get("role") == "assistant":
                 content = msg.get("content", "") or "[No content]"
-                self.console.print(Panel(
-                    content, title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"))
+                renderables = []
+                if content:
+                    renderables.append(Text(content, justify="left"))
+                if msg.get("tool_calls"):
+                    for tc_full in msg["tool_calls"]:
+                        name, args = tc_full.get("function", {}).get(
+                            "name", "..."), tc_full.get("function", {}).get("arguments", "")
+                        try:
+                            # For rendering, if it's a tool call, show the tool code as Syntax
+                            script = json.loads(args or '{}').get('script', args)
+                            renderables.append(Panel(Syntax(script, name, theme="monokai", line_numbers=self.borders_enabled),
+                                               title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                        except (json.JSONDecodeError, AttributeError):
+                            # If it's not a parsable script, just show the arguments as text
+                            renderables.append(Panel(Text(
+                                args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
+                if renderables:
+                    self.console.print(Panel(Group(
+                        *renderables), title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"))
+                else:
+                    # Fallback for assistant message with no content and no tool_calls
+                    self.console.print(Panel(
+                        "[No content or tool calls]", title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"))
+
             elif msg.get("role") == "tool":
-                content = msg.get("content", "") or "[No content]"
+                content = msg.get("content", "") or "[No output]"
                 output_renderable = Text(content)
                 self.console.print(Panel(
                     output_renderable, title=f"[bold green]Tool Output: {msg.get('name', 'N/A')}[/bold green]", border_style="green"))
@@ -354,6 +432,8 @@ class ChatClient:
         return style if self.borders_enabled else "none"
 
     def save_chat(self) -> str:
+        # This standard save_chat will be used for Ctrl+C, etc.
+        # Context push/pop will use _save_chat_messages_to_file for specific naming
         summary = "chat_summary"
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_summary = re.sub(r"[^\w-]", "_", summary)
@@ -365,7 +445,7 @@ class ChatClient:
     def load_chat(self, chat_name: str):
         """
         Loads a previous chat from the localChats directory.
-        Re-renders all tool calls with proper formatting.
+        Re-renders all messages to display the restored conversation.
         """
         self.console.print(f"Loading chat: {chat_name}")
         try:
@@ -391,48 +471,21 @@ class ChatClient:
             with open(chat_file, "r") as f:
                 loaded_messages = json.load(f)
 
+            # Clear display before rendering new chat
+            self._clear_display()
+            
             # Clear the current messages and replace them
             self.messages.clear()
-            # Reset conversation stack when loading a new chat
-            self.context_stack.clear()
             
-            # Render the loaded messages
+            # Render and append loaded messages
             for msg in loaded_messages:
                 self.messages.append(msg)  # Always append to history first
-
-                if msg.get("role") == "system":
+                # Render based on role
+                if msg.get("role") == "system" and self.messages.index(msg) == 0:
                     self.console.print(Panel(
                         msg["content"], title="[bold cyan]System Prompt[/bold cyan]", border_style=self.get_border_style("dim")))
-                elif msg.get("role") == "user":
-                    self.console.print(Panel(
-                        msg["content"], title="[bold green]You[/bold green]", border_style="green"))
-                elif msg.get("role") == "assistant":
-                    # Handle assistant content and potential tool calls
-                    renderables = []
-                    if msg.get("content"):
-                        renderables.append(
-                            Text(msg["content"], justify="left"))
-                    if msg.get("tool_calls"):
-                        for tc_full in msg["tool_calls"]:
-                            name, args = tc_full.get("function", {}).get(
-                                "name", "..."), tc_full.get("function", {}).get("arguments", "")
-                            try:
-                                script = json.loads(
-                                    args or '{}').get('script', args)
-                                renderables.append(Panel(Syntax(script, name, theme="monokai", line_numbers=self.borders_enabled),
-                                                   title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
-                            except (jsonJSONDecodeError, AttributeError):
-                                renderables.append(Panel(Text(
-                                    args), title=f"[bold yellow]Tool Call: {name}[/bold yellow]", border_style="yellow"))
-                    if renderables:
-                        self.console.print(Panel(Group(
-                            *renderables), title="[bold cyan]Assistant[/bold cyan]", border_style="cyan"))
-
-                elif msg.get("role") == "tool":
-                    # Handle tool output display
-                    output_renderable = Text(msg["content"])
-                    self.console.print(Panel(
-                        output_renderable, title=f"[bold green]Tool Output: {msg.get('name', 'N/A')}[/bold green]", border_style="green"))
+                else:
+                    self._render_message(msg)
 
             self.console.print(
                 "--- End of loaded conversation ---", style="dim")
