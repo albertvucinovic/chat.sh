@@ -4,6 +4,11 @@
         "model_name": "../vllm/Models/mistralai/Devstral-Small-2507-UD-QK_K.gguf",
         "max_tokens": 40000
     },
+    "Qwen 32B AWQ": {
+        "provider": "local",
+        "model_name": "Qwen/Qwen3-32B-AWQ",
+        "max_tokens": 32000
+    },
     "Kimi K2 Groq": {
         "provider": "groq",
         "model_name": "moonshotai/kimi-k2-instruct",
