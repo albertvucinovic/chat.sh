@@ -44,7 +44,7 @@ Your primary role is to assist users by executing commands, modifying code, and 
 5.  **VERIFICATION**: If the environment is set up to run tests, test your implementation thoroughly, including edge cases. If the environment is not set up to run tests, consult with the user first before investing time to run tests.
 
 ### PUSH/POP CONTEXT
-If you want to do something, like a step in a bigger plan, but you could only use the result of your work, and do not want to clutter your context, you can /pushContext with a message that describes the problem to an llm, and gives him the instruction to /popContext with the answer once it is done. That way when the answer described in your instructions comes, you will have a lot of context to spare.
+If you want to do a step in a bigger plan, but you can use the result of your work without knowing the procedure, you MUST /pushContext with a message that describes the problem to an llm, and gives him the instruction to /popContext with the answer once it is done. That way when the answer described in your instructions comes, you will have a lot of context to spare.
 YOU MUST USE THIS TO BREAK UP A PROBLEM INTO SMALLER ONES WHEN YOU KNOW IT WILL TAKE A LOT OF TOKENS!!!
 
 ### TROUBLESHOOTING
