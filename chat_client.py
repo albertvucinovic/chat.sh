@@ -132,23 +132,6 @@ class ChatClient:
         """Clear the display using ANSI codes."""
         self.console.print("\033[2J\033[H", end="")
 
-    def _save_chat_messages_to_file(self, messages_to_save: List[Dict], file_prefix: str, identifier: str = "") -> str:
-        """Saves an arbitrary list of messages to a file and returns the path."""
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_identifier = re.sub(r"[^\w-]", "_", identifier[:30]) if identifier else ""
-        
-        if safe_identifier:
-            file_name = f"{timestamp}_{file_prefix}_{safe_identifier}.json"
-        else:
-            file_name = f"{timestamp}_{file_prefix}.json"
-            
-        file_path = self.chat_dir / file_name
-        
-        with open(file_path, "w") as f:
-            json.dump(messages_to_save, f, indent=2)
-            
-        return str(file_path)
-
     def push_context(self, context: str) -> str:
         """Save current chat and start completely fresh context."""
         # Save current chat (the conversation before the push)
@@ -534,8 +517,8 @@ class ChatClient:
             if tool_calls_buf:
                 assistant_msg["tool_calls"] = list(tool_calls_buf.values())
             
-            if not assistant_msg.get("content") and not assistant_msg.get("tool_calls"):
-                return # Nothing to do
+            if assistant_msg.get("content"):
+                self.summary = self.extract_summary(assistant_msg.get("content"))
             
             self.messages.append(assistant_msg)
             
@@ -640,16 +623,34 @@ class ChatClient:
     def get_border_style(self, style: str) -> str:
         return style if self.borders_enabled else "none"
 
+    def extract_summary(self, text):
+        start_tag, end_tag = "<summary>", "</summary>"
+        start_index = text.rfind(start_tag)
+        if start_index == -1: return None
+        start_index += len(start_tag)
+        end_index = text.find(end_tag, start_index)
+        if end_index == -1: return None
+        return text[start_index:end_index].strip()
+
     def save_chat(self) -> str:
         # This standard save_chat will be used for Ctrl+C, etc.
         # Context push/pop will use _save_chat_messages_to_file for specific naming
-        summary = "chat_summary"
+        summary = self.summary if self.summary else "chat_summary"
+        return self._save_chat_messages_to_file(self.messages, "", summary)
+
+    def _save_chat_messages_to_file(self, messages_to_save: List[Dict], file_prefix: str, identifier: str = "") -> str:
+        """Saves an arbitrary list of messages to a file and returns the path."""
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_summary = re.sub(r"[^\w-]", "_", summary)
-        file_path = self.chat_dir / f"{timestamp}_{safe_summary}.json"
+        safe_identifier = re.sub(r"[^\w-]", "_", identifier[:30]) if identifier else ""
+        if safe_identifier:
+            file_name = f"{timestamp}_{file_prefix}_{safe_identifier}.json"
+        else:
+            file_name = f"{timestamp}_{file_prefix}.json"
+        file_path = self.chat_dir / file_name
         with open(file_path, "w") as f:
-            json.dump(self.messages, f, indent=2)
+            json.dump(messages_to_save, f, indent=2)
         return str(file_path)
+
 
     def load_chat(self, chat_name: str):
         """
