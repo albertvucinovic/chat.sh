@@ -1,4 +1,9 @@
 {
+    "QwQ 32B Q8_0": {
+        "provider": "local",
+        "model_name": "../vllm/Model/Qwen/QwQ-32B.Q8_0.gguf",
+        "max_tokens": 128000
+    },
     "Devstral 2507 QK_K": {
         "provider": "local",
         "model_name": "../vllm/Models/mistralai/Devstral-Small-2507-UD-QK_K.gguf",

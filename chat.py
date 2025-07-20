@@ -85,7 +85,7 @@ def main():
         Panel(
             "Chat started. [bold]Tab[/bold] to autocomplete, [bold]Right Arrow[/bold] to accept.\n"
             "[bold]Ctrl+D[/bold] to submit. [bold]Ctrl+B[/bold] for borders. [bold]Ctrl+E[/bold] to clear. [bold]Ctrl+C[/bold] to exit.\n"
-            "[bold]/pushContext <context>[/bold] - Push current chat and start new context.\n"
+            "[bold]/pushContext <context_or_file.md>[/bold] - Push current chat and start new context.\n"
             "[bold]/popContext <return_value>[/bold] - Pop context from stack and return to previous.\n",
             title="[bold]Welcome[/bold]",
             border_style=client.get_border_style("magenta")
@@ -143,30 +143,6 @@ def main():
                     console.print("[yellow]No chat file specified.[/yellow]")
                 continue
 
-            elif user_input.startswith("/global/"):
-                client.messages.append({"role": "user", "content": user_input}) # Add command to history
-                command_file = user_input[len("/global/"):].strip()
-                if not command_file.endswith(".md"):
-                    command_file += ".md"
-
-                script_dir = os.path.dirname(os.path.realpath(__file__))
-                file_path = os.path.join(
-                    script_dir, "global_commands", command_file)
-
-                try:
-                    with open(file_path, 'r') as f:
-                        command_content = f.read()
-                    console.print(Panel(
-                        f"Executing global command: [bold]{command_file}[/bold]", border_style="yellow", box = client.boxStyle))
-                    client.send_message(command_content)
-                except FileNotFoundError:
-                    console.print(
-                        f"[bold red]Error: Global command file not found: {command_file}[/bold red]")
-                except Exception as e:
-                    console.print(
-                        f"[bold red]Error executing global command: {e}[/bold red]")
-                continue
-
             elif user_input.startswith("/model"):
                 client.messages.append({"role": "user", "content": user_input}) # Add command to history
                 model_key = user_input[len("/model"):].strip()
@@ -181,7 +157,7 @@ def main():
                     console.print(Panel(
                         result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan", box = client.boxStyle))
                 else:
-                    console.print("[yellow]Usage: /pushContext <new_context>[/yellow]")
+                    console.print("[yellow]Usage: /pushContext <new_context_or_file.md>[/yellow]")
                 continue
 
             elif user_input.startswith("/popContext"):

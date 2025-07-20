@@ -82,16 +82,48 @@ class ChatClient:
     def _clear_display(self):
         self.console.print("\033[2J\033[H", end="")
 
-    def push_context(self, context: str) -> str:
-        saved_file_path = self._save_chat_messages_to_file(self.messages, "pushed_context", context)
+    def push_context(self, context_or_path: str) -> str:
+        """Save current chat and start completely fresh context, possibly from a file."""
+        final_context = context_or_path
+        
+        if context_or_path.endswith(".md"):
+            file_path_str = context_or_path
+            
+            if file_path_str.startswith("global/"):
+                script_dir = Path(__file__).resolve().parent
+                file_path = script_dir / "global_commands" / file_path_str[len("global/"):]
+            else:
+                file_path = Path(file_path_str)
+                
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    file_content = f.read()
+                
+                instruction = "[SYSTEM NOTE: Your current task is to follow the instructions in this file. When you are finished, you MUST call the `popContext` tool with a summary of the outcome as the `return_value`.]\n\n"
+                final_context = instruction + file_content
+                
+            except FileNotFoundError:
+                error_msg = f"Error: File not found at '{file_path}'"
+                self.console.print(f"[bold red]{error_msg}[/bold red]")
+                return error_msg
+            except Exception as e:
+                error_msg = f"Error reading file: {e}"
+                self.console.print(f"[bold red]{error_msg}[/bold red]")
+                return error_msg
+
+        saved_file_path = self._save_chat_messages_to_file(self.messages, "pushed_context", context_or_path.split('/')[-1])
         self.context_stack.append(saved_file_path)
         self._clear_display()
-        self.messages = [{"role": "system", "content": self.original_system_prompt}, {"role": "user", "content": context}]
+        
+        self.messages = [{"role": "system", "content": self.original_system_prompt}, {"role": "user", "content": final_context}]
+        
         self.display_manager.render_system_prompt(self.original_system_prompt)
-        self.display_manager.render_message({"role": "user", "content": context})
+        self.display_manager.render_message({"role": "user", "content": final_context})
+        
         self.console.print(Panel(f"[bold green]⬇️ Context Pushed[/bold green]", title="[bold]Entering New Context[/bold]", border_style="green", box=self.boxStyle))
         self.console.print(f"[dim]Previous context saved to: {Path(saved_file_path).name}[/dim]")
-        return f"Entered new context: {context}"
+        
+        return f"Entered new context from: {context_or_path}"
 
     def pop_context(self, return_value: str) -> str:
         current_sub_context_file = self._save_chat_messages_to_file(self.messages, "popped_context", return_value)
@@ -259,15 +291,26 @@ class ChatClient:
 
     def load_chat(self, chat_name: str):
         self.console.print(f"Loading chat: {chat_name}")
-        try:
-            matches = list(self.chat_dir.glob(f"*{chat_name}*.json"))
-            if len(matches) == 1: chat_file = matches[0]
-            else:
-                self.console.print(f"[bold red]Error: Chat file for '{chat_name}' not found or not unique.[/bold red]")
-                all_chats = sorted([f.name for f in self.chat_dir.glob("*.json")], reverse=True)
-                self.console.print("Available chats:\n" + "\n".join(f"- {f}" for f in all_chats))
+        chat_file = None
+        
+        potential_file = self.chat_dir / chat_name
+        if potential_file.is_file():
+            chat_file = potential_file
+        else:
+            all_chats = [f for f in self.chat_dir.iterdir() if f.suffix == ".json"]
+            partial_matches = [f for f in all_chats if chat_name in f.name]
+            if len(partial_matches) == 1:
+                chat_file = partial_matches[0]
+            elif len(partial_matches) > 1:
+                self.console.print(f"[bold red]Error: Chat name '{chat_name}' is ambiguous. Matches:[/bold red]")
+                for f in partial_matches: self.console.print(f"- {f.name}")
                 return
+        
+        if not chat_file:
+            self.console.print(f"[bold red]Error: Chat file for '{chat_name}' not found.[/bold red]")
+            return
 
+        try:
             with open(chat_file, "r") as f: loaded_messages = json.load(f)
             self._clear_display()
             self.messages.clear()
