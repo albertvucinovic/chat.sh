@@ -184,6 +184,20 @@ class ChatClient:
         self._update_provider_and_url()
         self.console.print(f"[bold green]Switched to model: '{self.current_model_key}'[/bold green]")
 
+    def _sanitize_messages_for_api(self, messages: List[Dict]) -> List[Dict]:
+        """Removes any non-standard keys from messages before sending to the API."""
+        sanitized_messages = []
+        keys_to_remove = {"reasoning_content"} 
+        for msg in messages:
+            if isinstance(msg, dict):
+                sanitized_msg = {key: value for key, value in msg.items() if key not in keys_to_remove}
+                if sanitized_msg.get("content") is None and "tool_calls" not in sanitized_msg:
+                     sanitized_msg["content"] = ""
+                if sanitized_msg.get("role") == "assistant" and "tool_calls" in sanitized_msg and not sanitized_msg["tool_calls"]:
+                    del sanitized_msg["tool_calls"]
+                sanitized_messages.append(sanitized_msg)
+        return sanitized_messages
+
     def send_message(self, message: str):
         self.messages.append({"role": "user", "content": message})
         while True:
@@ -192,11 +206,13 @@ class ChatClient:
             if not api_model_name:
                 self.console.print("[bold red]API model name not found.[/bold red]"); return
             
+            messages_for_api = self._sanitize_messages_for_api(self.messages)
+            
             assistant_text_parts, reasoning_parts, tool_calls_buf, interrupted = [], [], {}, False
             try:
                 with Live(console=self.console, auto_refresh=False, vertical_overflow="visible") as live:
                     live.update(self.display_manager.create_live_display(None, {}), refresh=True)
-                    response = requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": self.messages, "tools": self.tools, "tool_choice": "auto", "stream": True}, timeout=120, stream=True)
+                    response = requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": True}, timeout=120, stream=True)
                     response.raise_for_status()
                     
                     for line in response.iter_lines():
@@ -252,8 +268,11 @@ class ChatClient:
         self.messages.append({"role": "user", "content": message})
         api_model_name = self.models_config.get(self.current_model_key, {}).get("model_name")
         if not api_model_name: self.console.print("[bold red]API model name not found.[/bold red]"); return
+        
+        messages_for_api = self._sanitize_messages_for_api(self.messages)
+        
         try:
-            requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": self.messages, "stream": False, "max_tokens": 1}, timeout=30).raise_for_status()
+            requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": messages_for_api, "stream": False, "max_tokens": 1}, timeout=30).raise_for_status()
         except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
             self.console.print(f"\n[bold red]Error: Failed to send context to LLM: {e}[/bold red]")
             self.messages.pop()

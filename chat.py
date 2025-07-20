@@ -156,6 +156,9 @@ def main():
                     result = client.push_context(context)
                     console.print(Panel(
                         result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan", box = client.boxStyle))
+                    # If the context push was successful, trigger the assistant's turn.
+                    if not result.startswith("Error:"):
+                        client.send_message("") # An empty message makes the assistant respond to the new context.
                 else:
                     console.print("[yellow]Usage: /pushContext <new_context_or_file.md>[/yellow]")
                 continue
