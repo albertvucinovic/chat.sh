@@ -202,6 +202,10 @@ def main():
                 else:
                     print("Tool calls need confirmation")
                 continue
+            
+            elif user_input.startswith("/toggleThinkingDisplay"):
+                client.toggle_thinking_display()
+                continue
 
             client.send_message(user_input)
 
