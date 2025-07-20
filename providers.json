@@ -20,7 +20,7 @@
         "api_key_env": "GROQ_API_KEY"
     },
     "togetherai": {
-        "api_base": "https://api.together.xyz/v1/chat./completions",
+        "api_base": "https://api.together.xyz/v1/chat/completions",
         "api_key_env": "TOGETHERAI_API_KEY"
     }
 }

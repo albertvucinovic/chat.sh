@@ -15,6 +15,9 @@ Egg is a powerful, terminal-based chat application designed for developers and p
 - **Configuration-Driven**:
     - `models.json`: Define the models you want to use with a unique display name for each model-provider pair.
     - `providers.json`: Configure the API endpoints and environment variables for each provider's API key.
+        - Here you define the names of the variables that will hold the api key
+        - chat.sh automatically sources .env file in current directory, so you can put api keys themselves there
+            - export OPENAI_API_KEY="sk-..."
 - **Rich Terminal UI**:
     - Built with `rich` and `prompt_toolkit`.
     - Autocompletion for commands and file paths.
@@ -79,6 +82,7 @@ Egg is a powerful, terminal-based chat application designed for developers and p
     export OPENAI_API_KEY="sk-..."
     # No key needed for default local provider
     ```
+    You can also put those statements into .env, where they will be sourced by chat.sh on startup.
 
 ## Usage
 

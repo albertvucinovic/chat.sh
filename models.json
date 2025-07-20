@@ -1,9 +1,4 @@
 {
-    "QwQ 32B Q8_0": {
-        "provider": "local",
-        "model_name": "../vllm/Model/Qwen/QwQ-32B.Q8_0.gguf",
-        "max_tokens": 128000
-    },
     "Devstral 2507 QK_K": {
         "provider": "local",
         "model_name": "../vllm/Models/mistralai/Devstral-Small-2507-UD-QK_K.gguf",
@@ -13,6 +8,11 @@
         "provider": "local",
         "model_name": "Qwen/Qwen3-32B-AWQ",
         "max_tokens": 32000
+    },
+    "R1 0528": {
+        "provider": "togetherai",
+        "model_name": "deepseek-ai/DeepSeek-R1",
+        "max_tokens": 128000
     },
     "Kimi K2 Groq": {
         "provider": "groq",
