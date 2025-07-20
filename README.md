@@ -10,7 +10,7 @@ Egg is a powerful, terminal-based chat application designed for developers and p
 
 - **Multi-Model & Multi-Provider**: Seamlessly switch between different AI models from various providers (e.g., OpenAI, Anthropic, Google, local instances) right in the middle of a chat.
 - **Persistent Chat History**: Your conversation context is preserved when you switch models.
-- **Streaming Responses**: Responses from the assistant, including tool calls, are streamed live for a responsive feel.
+- **Streaming Responses**: Responses from the assistant, including tool calls and reasoning, are streamed live for a responsive feel.
 - **Interactive Tool Use**: The assistant can request to execute `bash` and `python` scripts, which you can approve or deny before they run.
 - **Configuration-Driven**:
     - `models.json`: Define the models you want to use with a unique display name for each model-provider pair.
@@ -27,32 +27,9 @@ Egg is a powerful, terminal-based chat application designed for developers and p
     - `Ctrl+B`: Toggle UI borders on/off.
     - `Ctrl+E`: Clear the current input line.
 - **Chat Management**:
-    - Save and load chat sessions with the `o <filename>` command
-    - Context management with `/pushContext` and `/popContext` commands
-    - Persistent chat history across model switches
-- **Memory System**: Persistent storage for context and useful information across sessions.
-- **Command System**: Extensible command system with local and global commands.
-
-## File Structure
-
-```
-chat.sh/
-├── chat.py              # Main application entry point
-├── chat_client.py       # Core chat client logic
-├── completer.py         # Autocompletion system
-├── executors.py         # Tool execution handlers
-├── input_handler.py     # Input processing utilities
-├── models.json          # Model definitions
-├── providers.json       # API provider configuration
-├── systemPrompt         # Base system prompt for AI
-├── requirements.txt     # Python dependencies
-├── chat.sh            # Launcher script
-├── AI.md               # Project-specific directives for Egg
-├── commands/           # Local command definitions
-├── global_commands/    # Global command definitions
-├── localChats/        # Saved chat sessions
-└── memory/            # Persistent storage directory
-```
+    - Save and load chat sessions with the `o <filename>` command.
+    - Manage conversation context with `/pushContext` and `/popContext` commands.
+- **File-based Tasks**: Use `/pushContext` to load instructions from local or global markdown files, turning the assistant into a temporary, task-focused agent.
 
 ## Setup
 
@@ -112,13 +89,11 @@ Run the application with the `chat.sh` script:
 
 ### Commands
 
-- **/model `<display_name>`**: Switch the active AI model.
+- **/model `<display_name>`**: Switch the active AI model. Typing `/model ` and hitting `Tab` will show available models.
 
 - **Context Commands**:
-  - `/pushContext <description>` - Save current chat and start new context
-  - `/popContext <return_value>` - Return to previous context and restore chat
-  - Example: `/model Local Llama3`
-  - Typing `/model ` and hitting `Tab` will show available models.
+  - `/pushContext <description_or_filepath.md>` - Save current chat and start a new context. Supports file paths, including from `global_commands/` (e.g., `/pushContext global/pirate_task.md`).
+  - `/popContext <return_value>` - Return to previous context and restore chat.
 
 - **o `<chat_file_name>`**: Open (load) a previously saved chat session from the `localChats/` directory.
   - Supports autocompletion - type `o ` and hit `Tab` to see available chats.
@@ -126,17 +101,14 @@ Run the application with the `chat.sh` script:
 - **b `<command>`**: Execute a local bash command and inject the output into the conversation history as context.
   - Example: `b ls -l`
 
-- **/global/<command>**: Execute global commands from the global_commands directory.
-  - Supports autocompletion for available commands.
-
 - **/toggleYesToolFlag**: Toggle whether tool calls (bash/python execution) are automatically approved without user confirmation.
+
+- **/toggleThinkingDisplay**: Toggle the live display of the AI's reasoning process during response generation.
 
 ### Advanced Features
 
-- **Memory System**: The assistant can store and retrieve information across sessions using the memory system.
-- **Command Extensions**: Add custom functionality by creating new command files in the commands/ or global_commands/ directories.
-- **Context Preservation**: Chat history and context persist across model switches and sessions.
-- **Tool Integration**: The assistant can use bash and python tools to help with tasks, with user confirmation for security.
+- **File-based Task Automation**: Add custom functionality by creating new task files in `global_commands/` or elsewhere. The assistant can then be instructed to load these files using `/pushContext` to perform complex, multi-step tasks.
+- **Tool Integration**: The assistant can use `bash` and `python` tools to help with tasks, with user confirmation for security.
 
 ### Keyboard Shortcuts
 
@@ -156,6 +128,10 @@ Run the application with the `chat.sh` script:
 - **models.json**: Model definitions and configurations
 - **providers.json**: API endpoint configurations
 
+## Testing
+
+For detailed manual testing procedures to verify all features, please see the [End-to-End Test Plan](EndToEnd.md).
+
 ## Development
 
 The application is built with Python 3.7+ and uses:
@@ -166,7 +142,7 @@ The application is built with Python 3.7+ and uses:
 
 ## Troubleshooting
 
-- Ensure all required environment variables are set
-- Check that models.json and providers.json are valid JSON
-- Verify API endpoints are accessible
-- Use `b ls localChats/` to see available saved chats
+- Ensure all required environment variables are set.
+- Check that `models.json` and `providers.json` are valid JSON.
+- Verify API endpoints are accessible.
+- Use `b ls localChats/` to see available saved chats.

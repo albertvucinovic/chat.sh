@@ -6,7 +6,7 @@ This document outlines the manual end-to-end tests required to verify the comple
 
 1.  The application is installed and the `chat.sh` script is executable.
 2.  A valid `models.json` and `providers.json` are present.
-3.  Required environment variables (e.g., `OPENAI_API_KEY`) are set.
+3.  Required environment variables (e.g., `OPENAI_API_KEY`) are set for the default model.
 4.  The `global_commands` directory exists and contains at least one sample command file (e.g., `pirate_task.md`).
 
 ---
@@ -28,14 +28,16 @@ This document outlines the manual end-to-end tests required to verify the comple
     *   A message "Chat saved to: <path>" is displayed.
     *   A new JSON file corresponding to the chat is created in the `localChats/` directory.
 
-### Test 1.2: Start Without API Keys
+### Test 1.2: Start with Missing API Key
 
 *   **Steps:**
     1.  Unset the required API key environment variable (e.g., `unset OPENAI_API_KEY`).
     2.  Run `./chat.sh`.
+    3.  Type a message like "Hello" and press `Ctrl+D` to send.
 *   **Expected Outcome:**
-    *   The application prints an error message indicating that environment variables are missing.
-    *   The application exits gracefully without starting the chat loop.
+    *   The application starts successfully and displays the welcome panel.
+    *   An error message is printed in the terminal indicating that the environment variable for the provider is not set.
+    *   The subsequent API call fails, resulting in an error message from the request (e.g., related to a 401 Unauthorized status).
 
 ---
 
