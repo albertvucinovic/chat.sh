@@ -96,29 +96,29 @@ class DisplayManager:
         """Creates the renderable Group for the Live display during streaming."""
         renderables = []
         
-        # 1. Thinking/Reasoning Panel
-        if self.client.show_thinking:
-            if reasoning:
-                renderables.append(Panel(
-                    Text(reasoning, justify="left"),
-                    title="[bold magenta]Reasoning[/bold magenta]",
-                    border_style="magenta",
-                    box=self.client.boxStyle
-                ))
-            else:
-                 renderables.append(Panel(
-                    "[dim]Assistant is thinking...[/dim]",
-                    border_style="cyan",
-                    box=self.client.boxStyle
-                ))
-        else:
+        # 1. Add the Reasoning panel only if it has content and the setting is enabled.
+        if self.client.show_thinking and reasoning:
+            renderables.append(Panel(
+                Text(reasoning, justify="left"),
+                title="[bold magenta]Reasoning[/bold magenta]",
+                border_style="magenta",
+                box=self.client.boxStyle
+            ))
+
+        # 2. Determine if the main assistant response has any content yet.
+        has_assistant_content = assistant_msg.get("content") or assistant_msg.get("tool_calls")
+
+        # 3. If there's no reasoning and no assistant content, show a single placeholder.
+        #    Otherwise, show the normal assistant panel.
+        if not renderables and not has_assistant_content:
+            # The entire display is empty, so show a placeholder.
             renderables.append(Panel(
                 "[dim]Assistant is thinking...[/dim]",
                 border_style="cyan",
                 box=self.client.boxStyle
             ))
-
-        # 2. Assistant Response Panel
-        renderables.append(self._create_assistant_panel(assistant_msg))
+        else:
+            # There's either reasoning or assistant content, so show the assistant panel.
+            renderables.append(self._create_assistant_panel(assistant_msg))
         
         return Group(*renderables)
