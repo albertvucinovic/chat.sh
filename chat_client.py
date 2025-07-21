@@ -267,6 +267,10 @@ class ChatClient:
             assistant_msg = {"role": "assistant"}
             if complete_message: assistant_msg["content"] = complete_message
             if tool_calls_buf: assistant_msg["tool_calls"] = list(tool_calls_buf.values())
+            
+            # Add the model key to the assistant message for persistent storage
+            assistant_msg["model_key"] = self.current_model_key
+            
             if assistant_msg.get("content"): self.summary = self.extract_summary(assistant_msg.get("content"))
             self.messages.append(assistant_msg)
             

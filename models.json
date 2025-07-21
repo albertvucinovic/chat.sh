@@ -4,6 +4,11 @@
         "model_name": "../vllm/Models/mistralai/Devstral-Small-2507-UD-QK_K.gguf",
         "max_tokens": 40000
     },
+    "Qwen3 32B Q6": {
+        "provider": "local",
+        "model_name": "../vllm/Models/Qwen/Qwen3-32B-UD-Q6_K_XL.gguf",
+        "max_tokens": 40000
+    },
     "Qwen 32B AWQ": {
         "provider": "local",
         "model_name": "Qwen/Qwen3-32B-AWQ",

@@ -52,11 +52,15 @@ class DisplayManager:
         except Exception as e:
             self.console.print(f"[red]Error rendering message: {e}[/red]")
 
-    def _create_assistant_panel(self, msg: Dict) -> Panel:
+    def _create_assistant_panel(self, msg: Dict, live_model_name: Optional[str] = None) -> Panel:
         """Creates a rich Panel for an assistant message, including tool calls."""
         content = msg.get("content", "")
         tool_calls = msg.get("tool_calls", [])
         renderables = []
+
+        # For live streaming, use the provided name. For loaded chats, get it from the message.
+        model_name = live_model_name or msg.get("model_key", self.client.current_model_key)
+        title = f"[bold cyan]Assistant ({model_name})[/bold cyan]"
 
         if content:
             renderables.append(Text(content, justify="left"))
@@ -87,7 +91,7 @@ class DisplayManager:
 
         return Panel(
             Group(*renderables),
-            title="[bold cyan]Assistant[/bold cyan]",
+            title=title,
             border_style="cyan",
             box=self.client.boxStyle
         )
@@ -119,6 +123,7 @@ class DisplayManager:
             ))
         else:
             # There's either reasoning or assistant content, so show the assistant panel.
-            renderables.append(self._create_assistant_panel(assistant_msg))
+            # Pass the current model name for live display.
+            renderables.append(self._create_assistant_panel(assistant_msg, live_model_name=self.client.current_model_key))
         
         return Group(*renderables)
