@@ -197,7 +197,7 @@ class ChatClient:
     def _sanitize_messages_for_api(self, messages: List[Dict]) -> List[Dict]:
         """Removes any non-standard keys from messages before sending to the API."""
         sanitized_messages = []
-        keys_to_remove = {"reasoning_content"} 
+        keys_to_remove = {"reasoning_content", "model_key"} 
         for msg in messages:
             if isinstance(msg, dict):
                 sanitized_msg = {key: value for key, value in msg.items() if key not in keys_to_remove}
@@ -209,7 +209,8 @@ class ChatClient:
         return sanitized_messages
 
     def send_message(self, message: str):
-        self.messages.append({"role": "user", "content": message})
+        # Add the model key to the user message for persistent storage
+        self.messages.append({"role": "user", "content": message, "model_key": self.current_model_key})
         while True:
             model_config = self.models_config.get(self.current_model_key, {})
             api_model_name = model_config.get("model_name")

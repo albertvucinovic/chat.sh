@@ -27,7 +27,8 @@ def main():
     # --- Dynamic Prompt Setup ---
     def get_prompt_message():
         """Returns the prompt string based on border state."""
-        return "[You]: " if client.borders_enabled else "You: "
+        model_name = client.current_model_key
+        return f"[You & {model_name}]: " if client.borders_enabled else f"You & {model_name}: "
 
     def get_continuation_message(width, line_number, wrap_count):
         """Returns the continuation prompt string based on border state."""

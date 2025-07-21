@@ -31,7 +31,9 @@ class DisplayManager:
         try:
             role = msg.get("role")
             if role == "user":
-                title = "[bold green]You[/bold green]"
+                # Get the model from the message, or fall back to the current client model
+                model_name = msg.get("model_key", self.client.current_model_key)
+                title = f"[bold green]You & {model_name}[/bold green]"
                 border_style = "green"
                 content_renderable = Text(msg.get("content", "") or "[No content]")
                 self.console.print(Panel(content_renderable, title=title, border_style=border_style, box=self.client.boxStyle))
