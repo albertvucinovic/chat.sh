@@ -20,6 +20,15 @@ import tool_manager
 
 
 class ChatClient:
+    def get_aimd_words_for_completion(self):
+        """Extracts unique words (3+ chars) from AI.md content."""
+        if not hasattr(self, "aimd_content") or not self.aimd_content:
+            return []
+        words = re.findall(r"\b\w{3,}\b", self.aimd_content)
+        seen = set()
+        # Return unique words, preserving order of first appearance
+        return [w for w in words if (wl := w.lower()) not in seen and not seen.add(wl)]
+
     def get_recent_words_for_completion(self, limit=500):
         words = []
         messages = self.messages[-50:] if hasattr(self, "messages") else []
@@ -44,6 +53,7 @@ class ChatClient:
         self.tools = tool_manager.TOOLS
         self.context_stack = []
         self.original_system_prompt = ""
+        self.aimd_content: str = ""
         self.boxStyle = box.ROUNDED
         self.yesTooolFlag = False
         self.show_thinking = True
@@ -67,9 +77,9 @@ class ChatClient:
         system_prompt_content += f"\nglobal folder: {Path(__file__).resolve().parent / 'global_commands'}\n"
         try:
             with open("AI.md", "r", encoding="utf-8") as f:
-                aimd_content = f.read()
-                if aimd_content:
-                    system_prompt_content += "\nTHIS PROJECT'S INSTRUCTIONS AND RULES:\n\n" + aimd_content
+                self.aimd_content = f.read()
+                if self.aimd_content:
+                    system_prompt_content += "\nTHIS PROJECT'S INSTRUCTIONS AND RULES:\n\n" + self.aimd_content
         except FileNotFoundError: pass
         return system_prompt_content
 

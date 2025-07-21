@@ -15,6 +15,9 @@ class ChatClient:
 class PtkCompleter(Completer):
     def __init__(self, client: "ChatClient"):
         self.client = client
+        self.all_commands = [
+            "/model", "/pushContext", "/popContext", "/toggleYesToolFlag", "/toggleThinkingDisplay", "o", "b"
+        ]
 
     def _get_filesystem_suggestions(self, prefix: str) -> List[str]:
         """Provides filesystem suggestions for a given prefix, handling '~'."""
@@ -38,6 +41,7 @@ class PtkCompleter(Completer):
         to ensure only one completion type is active at a time.
         """
         text = document.text_before_cursor
+        words = text.split(' ')
 
         # Handler for: o <chat_file>
         if text.startswith("o "):
@@ -93,6 +97,14 @@ class PtkCompleter(Completer):
         elif text.startswith("/popContext "):
             return
 
+        # Handler for command names themselves
+        elif len(words) == 1 and not text.endswith(' '):
+            prefix = words[0]
+            for cmd in self.all_commands:
+                if cmd.startswith(prefix):
+                    yield Completion(cmd, start_position=-len(prefix))
+            return
+
         # --- General Fallback Logic for Filesystem Paths ---
         else:
             parts = text.split()
@@ -111,14 +123,19 @@ class PtkCompleter(Completer):
                 return
 
         # --- Word completion from history for freeform chat ---
-        if not text.strip().startswith(('/', 'o ', '/model ', '/pushContext ', '/popContext ')):
+        if not text.strip().startswith(('/', 'o ', 'b ', '/model ', '/pushContext ', '/popContext ')):
             line = document.text_before_cursor
             m = re.search(r'(\w{3,})$', line)
             if m:
                 fragment = m.group(1)
                 recent_words = self.client.get_recent_words_for_completion(limit=200)
+                aimd_words = self.client.get_aimd_words_for_completion()
+
+                # Combine words, with AI.md words taking precedence, then recent words.
+                all_words = aimd_words + recent_words
+
                 seen = set()
-                matches = [w for w in recent_words if w.lower().startswith(fragment.lower()) and not (w.lower() in seen or seen.add(w.lower()))]
+                matches = [w for w in all_words if w.lower().startswith(fragment.lower()) and not (w.lower() in seen or seen.add(w.lower()))]
                 for w in matches:
                     yield Completion(w, start_position=-len(fragment))
             return
