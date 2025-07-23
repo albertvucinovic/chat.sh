@@ -26,7 +26,7 @@ This document outlines the manual end-to-end tests required to verify the comple
     *   The AI responds to the message.
     *   A "Saving chat and exiting..." message appears.
     *   A message "Chat saved to: <path>" is displayed.
-    *   A new JSON file corresponding to the chat is created in the `localChats/` directory.
+    *   A new JSON file corresponding to the chat is created in the `.egg/localChats/` directory.
 
 ### Test 1.2: Start with Missing API Key
 
@@ -80,7 +80,7 @@ This document outlines the manual end-to-end tests required to verify the comple
     5.  On a new line, type `The qui` and observe the greyed-out auto-suggestion.
     6.  Press the `Right Arrow` key.
 *   **Expected Outcome:**
-    *   Pressing `Tab` after `o ` should cycle through available chat files in `localChats/`.
+    *   Pressing `Tab` after `o ` should cycle through available chat files in `.egg/localChats/`.
     *   Pressing `Tab` after `/pushContext global/` should cycle through available files in `global_commands/`.
     *   The auto-suggestion should show `ck brown fox` or `ck brown bear`.
     *   Pressing `Right Arrow` accepts the suggestion, completing the text in the input buffer.
@@ -116,7 +116,7 @@ This document outlines the manual end-to-end tests required to verify the comple
 ### Test 4.1: Load Chat History
 
 *   **Steps:**
-    1.  Have a saved chat file in `localChats/` (e.g., `20250720_143000__chat_summary.json`).
+    1.  Have a saved chat file in `.egg/localChats/` (e.g., `20250720_143000__chat_summary.json`).
     2.  Start a new session.
     3.  Execute `o 20250720_143000` (a unique part of the filename).
 *   **Expected Outcome:**

@@ -48,7 +48,7 @@ class PtkCompleter(Completer):
             prefix = text[len("o "):]
             suggestions = set()
             try:
-                local_chats_dir = Path.cwd() / "localChats"
+                local_chats_dir = Path.cwd() / ".egg/localChats"
                 if local_chats_dir.is_dir():
                     chat_files = [f.name for f in local_chats_dir.iterdir()
                                   if f.name.startswith(prefix) and f.suffix == ".json"]

@@ -44,7 +44,7 @@ class ChatClient:
         self.display_manager = DisplayManager(self)
         self.headers = {"Content-Type": "application/json"}
         self.borders_enabled = True
-        self.chat_dir = Path.cwd() / "localChats"
+        self.chat_dir = Path.cwd() / ".egg/localChats"
         self.chat_dir.mkdir(parents=True, exist_ok=True)
         self.current_model_key = os.environ.get("API_MODEL", "OpenAI GPT-4o")
         self.base_url = None

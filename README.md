@@ -99,7 +99,7 @@ Run the application with the `chat.sh` script:
   - `/pushContext <description_or_filepath.md>` - Save current chat and start a new context. Supports file paths, including from `global_commands/` (e.g., `/pushContext global/pirate_task.md`).
   - `/popContext <return_value>` - Return to previous context and restore chat.
 
-- **o `<chat_file_name>`**: Open (load) a previously saved chat session from the `localChats/` directory.
+- **o `<chat_file_name>`**: Open (load) a previously saved chat session from the `.egg/localChats/` directory.
   - Supports autocompletion - type `o ` and hit `Tab` to see available chats.
 
 - **b `<command>`**: Execute a local bash command and inject the output into the conversation history as context.
@@ -149,4 +149,4 @@ The application is built with Python 3.7+ and uses:
 - Ensure all required environment variables are set.
 - Check that `models.json` and `providers.json` are valid JSON.
 - Verify API endpoints are accessible.
-- Use `b ls localChats/` to see available saved chats.
+- Use `b ls .egg/localChats/` to see available saved chats.
