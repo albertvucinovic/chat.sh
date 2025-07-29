@@ -25,7 +25,7 @@ TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "file_path": {"type": "string", "description": "Absolute path to file"},
+                "file_path": {"type": "string", "description": "Path to a file"},
                 "old_str": {"type": "string", "description": "Exact string to replace"},
                 "new_str": {"type": "string", "description": "Replacement string"},
                 "line_number": {

@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import os
 from io import StringIO
 from pathlib import Path
 
@@ -54,7 +55,12 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str, line_number: 
     """Replace exact string match in file with optional line context"""
     try:
         # Convert to absolute path
-        abs_path = Path(file_path).resolve()
+        cwd = Path(os.getcwd())
+        abs_path = Path(cwd/file_path).resolve()
+        # Prevent editing system files
+        system_dirs = ["/etc", "/usr", "/var", "/sys", "/boot", "/dev"]
+        if any(str(abs_path).startswith(d) for d in system_dirs):
+            return f"Error: Cannot edit system files in protected directories!"
         # Verify file exists
         if not abs_path.exists():
             return f"Error: File not found at {abs_path}"
