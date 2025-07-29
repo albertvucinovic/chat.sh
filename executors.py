@@ -64,39 +64,54 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str, line_number: 
         # Verify file exists
         if not abs_path.exists():
             return f"Error: File not found at {abs_path}"
-        # Read file content
+        
+        # Read entire file content as a single string
         with open(abs_path, 'r') as f:
-            lines = f.readlines()
+            content = f.read()
+        
         # Track replacements
         replacements = []
+        
         # Perform replacement
         if line_number:
-            # Line-specific replacement
-            if 1 <= line_number <= len(lines):
-                if old_str in lines[line_number-1]:
-                    lines[line_number-1] = lines[line_number-1].replace(old_str, new_str)
-                    replacements.append(f"Line {line_number}")
-                else:
-                    return f"String not found in line {line_number}"
-            else:
+            # Convert line number to character position range
+            lines = content.split('\n')
+            if line_number < 1 or line_number > len(lines):
                 return f"Invalid line number: {line_number} (file has {len(lines)} lines)"
+            
+            # Calculate start and end positions for the line
+            line_start = 0
+            for i in range(line_number-1):
+                line_start += len(lines[i]) + 1  # +1 for the newline character
+            
+            line_end = line_start + len(lines[line_number-1])
+            
+            # Check if old_str exists within this line
+            line_content = content[line_start:line_end]
+            if old_str in line_content:
+                # Replace within the line
+                new_line = line_content.replace(old_str, new_str)
+                new_content = content[:line_start] + new_line + content[line_end:]
+                replacements.append(f"Line {line_number}")
+            else:
+                return f"String not found in line {line_number}"
+            
+            # Write changes
+            with open(abs_path, 'w') as f:
+                f.write(new_content)
         else:
             # Full file replacement
-            new_lines = []
-            replaced = False
-            for i, line in enumerate(lines):
-                if old_str in line:
-                    new_lines.append(line.replace(old_str, new_str))
-                    replacements.append(f"Line {i+1}")
-                    replaced = True
-                else:
-                    new_lines.append(line)
-            if not replaced:
+            if old_str in content:
+                new_content = content.replace(old_str, new_str)
+                count = content.count(old_str)
+                replacements.append(f"{count} location(s)")
+            else:
                 return "String not found in file"
-            lines = new_lines
-        # Write changes
-        with open(abs_path, 'w') as f:
-            f.writelines(lines)
-        return f"Success! Replaced in {len(replacements)} location(s): {', '.join(replacements)}"
+            
+            # Write changes
+            with open(abs_path, 'w') as f:
+                f.write(new_content)
+        
+        return f"Success! Replaced in {', '.join(replacements)}"
     except Exception as e:
         return f"Error: {str(e)}"
