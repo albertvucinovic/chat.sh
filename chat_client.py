@@ -55,8 +55,9 @@ class ChatClient:
         self.original_system_prompt = ""
         self.aimd_content: str = ""
         self.boxStyle = box.ROUNDED
-        self.yesTooolFlag = False
+        self.yesToolFlag = False
         self.show_thinking = True
+        self.in_single_turn_auto_execute_calls = False
 
         if not self.models_config:
             self.console.print("[bold red]Fatal: No models configured in models.json.[/bold red]")

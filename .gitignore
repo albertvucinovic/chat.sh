@@ -5,3 +5,4 @@ venv
 localChats
 commands
 __pycache*
+temp/

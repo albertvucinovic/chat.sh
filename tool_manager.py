@@ -96,11 +96,23 @@ def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True
             Syntax(display_content, syntax_lang, theme="monokai", line_numbers=client.borders_enabled), 
             title=f"[bold yellow]Tool Call: {fn_name}[/bold yellow]", border_style="yellow", box=client.boxStyle))
     
-    try:
-        execute = client.yesTooolFlag or confirm(f"Execute the {fn_name} tool call shown above?")
-    except (EOFError, KeyboardInterrupt):
-        execute = False
+    if client.in_single_turn_auto_execute_calls or client.yesToolFlag:
+        execute = True
+    else:
+        while True:
+            response = input(f"Execute the {fn_name} tool call? [y/n/a] ").strip().lower()
+            if response in ('y', 'n', 'a'):
+                break
+            print("Invalid input. Please enter y, n, or a")
 
+        if response == 'a':
+            client.in_single_turn_auto_execute_calls = True
+            execute = True
+        elif response == 'y':
+            execute = True
+        else:  # response == 'n'
+            execute = False
+   
     if not execute:
         output = "--- SKIPPED BY USER ---"
         client.console.print("[yellow]Skipped by user.[/yellow]")

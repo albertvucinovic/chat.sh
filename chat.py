@@ -109,6 +109,7 @@ def main():
     # --- Main Application Loop ---
     while True:
         try:
+            client.in_single_turn_auto_execute_calls = False
             user_input = session.prompt().strip()
 
             if not user_input:
@@ -176,8 +177,8 @@ def main():
                 continue
 
             elif user_input.startswith("/toggleYesToolFlag"):
-                client.yesTooolFlag = not client.yesTooolFlag
-                if client.yesTooolFlag:
+                client.yesToolFlag = not client.yesToolFlag
+                if client.yesToolFlag:
                     print("TOOL CALLS WILL AUTOMATICALLY GO THROUGH")
                 else:
                     print("Tool calls need confirmation")
