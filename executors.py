@@ -1,6 +1,7 @@
 import subprocess
 import sys
 from io import StringIO
+from pathlib import Path
 
 def run_bash_script(script: str) -> str:
     """Executes a bash script and captures its stdout and stderr."""
@@ -48,3 +49,48 @@ def run_python_script(script: str) -> str:
     except Exception as e:
         sys.stdout, sys.stderr = old_stdout, old_stderr
         return f"--- STDERR ---\nError executing Python script: {e}"
+
+def str_replace_editor(file_path: str, old_str: str, new_str: str, line_number: int = None) -> str:
+    """Replace exact string match in file with optional line context"""
+    try:
+        # Convert to absolute path
+        abs_path = Path(file_path).resolve()
+        # Verify file exists
+        if not abs_path.exists():
+            return f"Error: File not found at {abs_path}"
+        # Read file content
+        with open(abs_path, 'r') as f:
+            lines = f.readlines()
+        # Track replacements
+        replacements = []
+        # Perform replacement
+        if line_number:
+            # Line-specific replacement
+            if 1 <= line_number <= len(lines):
+                if old_str in lines[line_number-1]:
+                    lines[line_number-1] = lines[line_number-1].replace(old_str, new_str)
+                    replacements.append(f"Line {line_number}")
+                else:
+                    return f"String not found in line {line_number}"
+            else:
+                return f"Invalid line number: {line_number} (file has {len(lines)} lines)"
+        else:
+            # Full file replacement
+            new_lines = []
+            replaced = False
+            for i, line in enumerate(lines):
+                if old_str in line:
+                    new_lines.append(line.replace(old_str, new_str))
+                    replacements.append(f"Line {i+1}")
+                    replaced = True
+                else:
+                    new_lines.append(line)
+            if not replaced:
+                return "String not found in file"
+            lines = new_lines
+        # Write changes
+        with open(abs_path, 'w') as f:
+            f.writelines(lines)
+        return f"Success! Replaced in {len(replacements)} location(s): {', '.join(replacements)}"
+    except Exception as e:
+        return f"Error: {str(e)}"

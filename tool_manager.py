@@ -8,7 +8,7 @@ from rich.syntax import Syntax
 from rich.text import Text
 from prompt_toolkit.shortcuts import confirm
 
-from executors import run_bash_script, run_python_script
+from executors import run_bash_script, run_python_script, str_replace_editor
 
 TOOLS = [
     {"type": "function", "function": {"name": "bash", "description": "Execute a bash script and return combined stdout/stderr.",
@@ -19,6 +19,23 @@ TOOLS = [
                                       "parameters": {"type": "object", "properties": {"context": {"type": "string"}}, "required": ["context"]}}},
     {"type": "function", "function": {"name": "popContext", "description": "Save current chat and restore previous context conversation.",
                                       "parameters": {"type": "object", "properties": {"return_value": {"type": "string"}}, "required": ["return_value"]}}},
+    {"type": "function", "function": {
+        "name": "str_replace_editor",
+        "description": "Replace specific text in files. Requires exact matches including whitespace.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to file"},
+                "old_str": {"type": "string", "description": "Exact string to replace"},
+                "new_str": {"type": "string", "description": "Replacement string"},
+                "line_number": {
+                    "type": "integer",
+                    "description": "Optional line number for context (1-indexed)"
+                }
+            },
+            "required": ["file_path", "old_str", "new_str"]
+        }
+    }}
 ]
 
 def parse_tool_calls_from_content(message_content: str) -> list:
@@ -122,6 +139,13 @@ def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True
         elif fn_name == "python": output = run_python_script(args.get("script", ""))
         elif fn_name == "pushContext": output = client.push_context(args.get("context", ""))
         elif fn_name == "popContext": output = client.pop_context(args.get("return_value", ""))
+        elif fn_name == "str_replace_editor":
+            output = str_replace_editor(
+                args.get("file_path"),
+                args.get("old_str"),
+                args.get("new_str"),
+                args.get("line_number")
+            )
         else: output = f"Unknown tool: {fn_name}"
         client.console.print(Panel(Text(output), title="[bold green]Execution Output[/bold green]", border_style="green", box=client.boxStyle))
         
