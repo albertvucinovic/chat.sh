@@ -28,10 +28,6 @@ TOOLS = [
                 "file_path": {"type": "string", "description": "Path to a file"},
                 "old_str": {"type": "string", "description": "Exact string to replace"},
                 "new_str": {"type": "string", "description": "Replacement string"},
-                "line_number": {
-                    "type": "integer",
-                    "description": "Optional line number for context (1-indexed)"
-                }
             },
             "required": ["file_path", "old_str", "new_str"]
         }

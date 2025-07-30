@@ -72,55 +72,27 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str, line_number: 
         # Track replacements
         replacements = []
         
-        # Perform replacement
-        if line_number:
-            # Convert line number to character position range
-            lines = content.splitlines(keepends=True)
-            if line_number < 1 or line_number > len(lines):
-                return f"Invalid line number: {line_number} (file has {len(lines)} lines)"
-            
-            # Calculate start and end positions for the line
-            line_start = 0
-            for i in range(line_number-1):
-                line_start += len(lines[i])
-            
-            line_end = line_start + len(lines[line_number-1])
-            
-            # Check if old_str exists within this line
-            line_content = content[line_start:line_end]
-            if old_str in line_content:
-                # Replace within the line
-                new_line = line_content.replace(old_str, new_str)
-                new_content = content[:line_start] + new_line + content[line_end:]
-                replacements.append(f"Line {line_number}")
-            else:
-                return f"String not found in line {line_number}"
-            
-            # Write changes
-            with open(abs_path, 'w', newline='') as f:
-                f.write(new_content)
+        # Full file replacement - search entire content
+        if old_str in content:
+            new_content = content.replace(old_str, new_str)
+            # Count occurrences
+            count = 0
+            start = 0
+            while start < len(new_content):
+                pos = new_content.find(new_str, start)
+                if pos == -1: break
+                count += 1
+                start = pos + len(new_str)
+            replacements.append(f"{count} location(s)")
         else:
-            # Full file replacement - search entire content
-            if old_str in content:
-                new_content = content.replace(old_str, new_str)
-                # Count occurrences
-                count = 0
-                start = 0
-                while start < len(new_content):
-                    pos = new_content.find(new_str, start)
-                    if pos == -1: break
-                    count += 1
-                    start = pos + len(new_str)
-                replacements.append(f"{count} location(s)")
-            else:
-                # Provide more debug info
-                return (f"String not found in file. Old string length: {len(old_str)}, " 
-                        f"File length: {len(content)}, First 50 chars of old string: {repr(old_str[:50])}, "
-                        f"First 100 chars of file: {repr(content[:100])}")
-            
-            # Write changes
-            with open(abs_path, 'w', newline='') as f:
-                f.write(new_content)
+            # Provide more debug info
+            return (f"String not found in file. Old string length: {len(old_str)}, " 
+                    f"File length: {len(content)}, First 100 chars of old string: {repr(old_str[:100])}, "
+                    f"First 200 chars of file: {repr(content[:200])}")
+        
+        # Write changes
+        with open(abs_path, 'w', newline='') as f:
+            f.write(new_content)
         
         return f"Success! Replaced in {', '.join(replacements)}"
     except Exception as e:
