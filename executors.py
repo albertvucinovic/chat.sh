@@ -73,7 +73,9 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str, line_number: 
         replacements = []
         
         # Full file replacement - search entire content
-        if old_str in content:
+        if old_str == "":
+            new_content = new_str + content
+        elif old_str in content:
             new_content = content.replace(old_str, new_str)
             # Count occurrences
             count = 0
