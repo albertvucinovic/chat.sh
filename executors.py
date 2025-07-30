@@ -3,7 +3,6 @@ import sys
 import os
 from io import StringIO
 from pathlib import Path
-import difflib
 
 def run_bash_script(script: str) -> str:
     """Executes a bash script and captures its stdout and stderr."""
@@ -47,7 +46,7 @@ def run_python_script(script: str) -> str:
         if stderr_val:
             output += f"--- STDERR ---\n{stderr_val}\n"
 
-        return output.strip() or "--- The command executed successfully and produced no output ---"
+        return output.strip() or "--- The script executed successfully and produced no output ---"
     except Exception as e:
         sys.stdout, sys.stderr = old_stdout, old_stderr
         return f"--- STDERR ---\nError executing Python script: {e}"
@@ -84,23 +83,46 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str, line_number: 
             while start < len(new_content):
                 pos = new_content.find(new_str, start)
                 if pos == -1: break
-                count += 1
+                count  = 1
                 start = pos + len(new_str)
             replacements.append(f"{count} location(s)")
         else:
-            # Find longest matching substring using difflib
-            seq_matcher = difflib.SequenceMatcher(None, old_str, content)
-            match = seq_matcher.find_longest_match(0, len(old_str), 0, len(content))
+            # Find longest substring starting with old_str
+            longest_match = ""
+            start_index = 0
             
-            if match.size > 0:
-                longest_match = old_str[match.a:match.a + match.size]
-                context_start = max(0, match.b - 20)
-                context_end = min(len(content), match.b + match.size + 20)
+            while start_index < len(content):
+                # Find next occurrence of old_str's first character
+                start_index = content.find(old_str[0], start_index)
+                if start_index == -1:
+                    break
+                
+                # Check how many consecutive characters match
+                match_length = 0
+                for i in range(len(old_str)):
+                    if start_index + i >= len(content):
+                        break
+                    if content[start_index + i] != old_str[i]:
+                        break
+                    match_length += 1
+                
+                # Update longest match found
+                if match_length > len(longest_match):
+                    longest_match = content[start_index:start_index + match_length]
+                
+                # Move to next position
+                start_index += 1
+                
+            # Prepare error message with longest match
+            if longest_match:
+                # Find context around the longest match
+                match_index = content.find(longest_match)
+                context_start = max(0, match_index - 20)
+                context_end = min(len(content), match_index + len(longest_match) + 20)
                 context = content[context_start:context_end]
                 
-                # Create error message with context
                 return (
-                    f"String not found in file. Found longest match of {match.size} characters.\n"
+                    f"String not found in file. Found longest match starting with old string: {len(longest_match)} characters.\n"
                     f"Longest match: {repr(longest_match)}\n"
                     f"Context in file:\n{repr(context)}"
                 )
