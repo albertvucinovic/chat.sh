@@ -96,7 +96,7 @@ Run the application with the `chat.sh` script:
 - **/model `<display_name>`**: Switch the active AI model. Typing `/model ` and hitting `Tab` will show available models.
 
 - **Context Commands**:
-  - `/pushContext <description_or_filepath.md>` - Save current chat and start a new context. Supports file paths, including from `global_commands/` (e.g., `/pushContext global/pirate_task.md`).
+  - `/pushContext <message_or_filepath_and_message>` - Save current chat and start a new context. The `message` should contain instructions for the LLM to `popContext` once it's done. If a file path is provided, its content will be used as the initial message, and any additional text in the command will be appended to it. (e.g., `/pushContext Solve this problem and then /popContext with the answer.` or `/pushContext global/pirate_task.md And then also, please respond with a funny joke.`).
   - `/popContext <return_value>` - Return to previous context and restore chat.
 
 - **o `<chat_file_name>`**: Open (load) a previously saved chat session from the `.egg/localChats/` directory.

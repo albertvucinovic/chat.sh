@@ -128,9 +128,8 @@ This document outlines the manual end-to-end tests required to verify the comple
 
 *   **Steps:**
     1.  Start a session and ask "What is the capital of France?". Wait for the answer "Paris".
-    2.  Execute `/pushContext Let's talk about something else. What is the capital of Germany?`.
-    3.  After the AI answers "Berlin", execute `/popContext The capital of Germany is Berlin.`.
-    4.  Ask the AI "What was the answer to my very first question?".
+    2.  Execute `/pushContext Let's talk about something else. You MUST answer with Berlin, and then /popContext with "The capital of Germany is Berlin.". What is the capital of Germany?`.
+    3.  After the AI answers "Berlin", and calls `/popContext`, ask the AI "What was the answer to my very first question?".
 *   **Expected Outcome:**
     *   After `/pushContext`, the screen clears and a new conversation begins about Germany.
     *   After `/popContext`, the screen clears, and the original conversation about France is restored.
@@ -157,6 +156,18 @@ This document outlines the manual end-to-end tests required to verify the comple
         *   The AI responds in a pirate voice, listing Red, Yellow, and Blue.
         *   The AI automatically calls `popContext`.
         *   The previous context is restored.
+
+### Test 4.4: Push and Pop Context (File-based Task with Additional Message)
+
+*   **Steps:**
+    1.  Create a file `joke_task.md` with the content: `Please state your name is Egg.`
+    2.  Start a session.
+    3.  Execute `/pushContext joke_task.md And then tell me a knock-knock joke. You MUST /popContext with the joke once you are done.`
+*   **Expected Outcome:**
+    *   The screen clears, and a new context is pushed containing the content of `joke_task.md` combined with the additional message.
+    *   The AI responds by stating its name is Egg and then tells a knock-knock joke.
+    *   The AI automatically calls `popContext` with the joke.
+    *   The previous context is restored, and the joke is appended as a return value.
 
 ---
 
