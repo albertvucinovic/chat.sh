@@ -8,7 +8,7 @@ from rich.syntax import Syntax
 from rich.text import Text
 from prompt_toolkit.shortcuts import confirm
 
-from executors import run_bash_script, run_python_script, str_replace_editor
+from executors import run_bash_script, run_python_script, str_replace_editor, replace_lines
 
 TOOLS = [
     {"type": "function", "function": {"name": "bash", "description": "Execute a bash script and return combined stdout/stderr.",
