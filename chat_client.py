@@ -93,28 +93,26 @@ class ChatClient:
     def _clear_display(self):
         self.console.print("\033[2J\033[H", end="")
 
-    def push_context(self, context_or_path: str) -> str:
-        """Save current chat and start completely fresh context, possibly from a file."""
-        final_context = context_or_path
+    def push_context(self, file_path: Optional[str] = None, additional_text: str = "") -> str:
+        """Save current chat and start completely fresh context, possibly from a file, with additional text."""
+        final_context_parts = []
+        context_identifier = ""
         
-        if context_or_path.endswith(".md"):
-            file_path_str = context_or_path
-            
-            if file_path_str.startswith("global/"):
+        if file_path:
+            context_identifier = file_path.split('/')[-1]
+            if file_path.startswith("global/"):
                 script_dir = Path(__file__).resolve().parent
-                file_path = script_dir / "global_commands" / file_path_str[len("global/"):]
+                file_full_path = script_dir / "global_commands" / file_path[len("global/"):]
             else:
-                file_path = Path(file_path_str)
+                file_full_path = Path(file_path)
                 
             try:
-                with open(file_path, 'r', encoding='utf-8') as f:
+                with open(file_full_path, 'r', encoding='utf-8') as f:
                     file_content = f.read()
-                
-                instruction = "[SYSTEM NOTE: Your current task is to follow the instructions in this file. When you are finished, you MUST call the `popContext` tool with a summary of the outcome as the `return_value`.]\n\n"
-                final_context = instruction + file_content
+                final_context_parts.append(file_content)
                 
             except FileNotFoundError:
-                error_msg = f"Error: File not found at '{file_path}'"
+                error_msg = f"Error: File not found at '{file_full_path}'"
                 self.console.print(f"[bold red]{error_msg}[/bold red]")
                 return error_msg
             except Exception as e:
@@ -122,19 +120,34 @@ class ChatClient:
                 self.console.print(f"[bold red]{error_msg}[/bold red]")
                 return error_msg
 
-        saved_file_path = self._save_chat_messages_to_file(self.messages, "pushed_context", context_or_path.split('/')[-1])
+        if additional_text:
+            if not context_identifier: # If no file, use part of additional_text as identifier
+                context_identifier = additional_text[:30].replace('\n', ' ')
+            final_context_parts.append(additional_text)
+
+        if not final_context_parts:
+            return "Error: No context or file provided for pushContext."
+
+        combined_context = "\n\n".join(final_context_parts).strip()
+        
+        # Add the instruction to popContext
+        instruction = "[SYSTEM NOTE: Your current task is to follow the instructions in this context. When you are finished, you MUST call the `popContext` tool with a summary of the outcome as the `return_value`. If your outcome is a markdown file, please call popContext with a path to the file you created.]\n\n"
+        final_user_message_content = instruction + combined_context
+
+        saved_file_path = self._save_chat_messages_to_file(self.messages, "pushed_context", context_identifier or "no_file")
         self.context_stack.append(saved_file_path)
         self._clear_display()
         
-        self.messages = [{"role": "system", "content": self.original_system_prompt}, {"role": "user", "content": final_context}]
+        # Start new context with the system prompt and the combined user message
+        self.messages = [{"role": "system", "content": self.original_system_prompt}, {"role": "user", "content": final_user_message_content}]
         
         self.display_manager.render_system_prompt(self.original_system_prompt)
-        self.display_manager.render_message({"role": "user", "content": final_context})
+        self.display_manager.render_message({"role": "user", "content": final_user_message_content})
         
         self.console.print(Panel(f"[bold green]⬇️ Context Pushed[/bold green]", title="[bold]Entering New Context[/bold]", border_style="green", box=self.boxStyle))
         self.console.print(f"[dim]Previous context saved to: {Path(saved_file_path).name}[/dim]")
         
-        return f"Entered new context from: {context_or_path}"
+        return f"Entered new context from: {file_path if file_path else 'additional text'}"
 
     def pop_context(self, return_value: str) -> str:
         current_sub_context_file = self._save_chat_messages_to_file(self.messages, "popped_context", return_value)

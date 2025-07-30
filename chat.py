@@ -1,5 +1,6 @@
 import sys
 import os
+import re # Added for pushContext parsing
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -153,16 +154,25 @@ def main():
 
             elif user_input.startswith("/pushContext"):
                 client.messages.append({"role": "user", "content": user_input}) # Add command to history
-                context = user_input[len("/pushContext"):].strip()
-                if context:
-                    result = client.push_context(context)
-                    console.print(Panel(
-                        result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan", box = client.boxStyle))
-                    # If the context push was successful, trigger the assistant's turn.
-                    if not result.startswith("Error:"):
-                        client.send_message("") # An empty message makes the assistant respond to the new context.
+                
+                # Regex to parse /pushContext. It captures an optional markdown file path and then the remaining text.
+                match = re.match(r"/pushContext\s*(\S+\.md)?\s*(.*)", user_input)
+                
+                if match:
+                    file_path = match.group(1) # Optional .md file path
+                    additional_text = match.group(2).strip() # Remaining text
+                    
+                    if file_path or additional_text:
+                        result = client.push_context(file_path, additional_text)
+                        console.print(Panel(
+                            result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan", box = client.boxStyle))
+                        # If the context push was successful, trigger the assistant's turn.
+                        if not result.startswith("Error:"):
+                            client.send_message("") # An empty message makes the assistant respond to the new context.
+                    else:
+                        console.print("[yellow]Usage: /pushContext [<file_path.md>] [<additional_text>][/yellow]")
                 else:
-                    console.print("[yellow]Usage: /pushContext <new_context_or_file.md>[/yellow]")
+                    console.print("[yellow]Usage: /pushContext [<file_path.md>] [<additional_text>][/yellow]")
                 continue
 
             elif user_input.startswith("/popContext"):
