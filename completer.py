@@ -70,15 +70,54 @@ class PtkCompleter(Completer):
                         yield Completion(name, start_position=-len(prefix))
             return
 
-        # Handler for: /pushContext <context_or_file>
-        elif text.startswith("/pushContext "):
-            prefix = text[len("/pushContext "):]
+        # Handler for: /pushContext [<file_path.md>] [<additional_text>]
+        elif text.startswith("/pushContext"):
+            # Get the input after the command and any leading spaces
+            input_after_command = text[len("/pushContext"):].lstrip()
+            current_fragment = document.get_word_before_cursor(WORD=True)
+            
+            # Regex to check if a file path (ending in .md) has been typed and is followed by a space
+            # This helps determine if we are now in the 'additional_text' part.
+            file_followed_by_space_match = re.match(r"^\S+\.md\s.*", input_after_command)
+            
+            # If an .md file path was recognized and followed by a space, we are in the additional_text part.
+            # OR, if there's no fragment currently being typed, but there's content after the command
+            # AND it doesn't look like a file path being typed (e.g., "/pushContext some text"),
+            # then also treat it as additional text.
+            is_in_additional_text_mode = False
+            if file_followed_by_space_match: # Case: /pushContext file.md <cursor_here_or_after>
+                is_in_additional_text_mode = True
+            elif ' ' in input_after_command and not re.match(r"^\S+\.md", input_after_command.split(' ')[0]):
+                # Case: /pushContext some other text (no .md file, but multiple words)
+                is_in_additional_text_mode = True
+            elif not current_fragment and input_after_command.strip() and not file_followed_by_space_match: # Case: /pushContext <cursor after command>
+                # If cursor is after command, and there's content but no fragment, and it's not a file followed by space
+                # This means it's the beginning of additional text or a file not yet typed.
+                # We will prioritize file suggestions first below.
+                pass # Let it fall through to file/general word suggestions
+            
+            if is_in_additional_text_mode or (not current_fragment and input_after_command.strip() and not file_followed_by_space_match):
+                # Provide general word completion (recent words, AI.md words)
+                if current_fragment or input_after_command.endswith(' '): # Only suggest if typing something or just typed a space
+                    recent_words = self.client.get_recent_words_for_completion(limit=200)
+                    aimd_words = self.client.get_aimd_words_for_completion()
+                    all_words = aimd_words + recent_words
+                    seen = set()
+                    matches = [w for w in all_words if w.lower().startswith(current_fragment.lower()) and not (w.lower() in seen or seen.add(w.lower()))]
+                    for w in matches:
+                        yield Completion(w, start_position=-len(current_fragment))
+                return
+            
+            # If not in additional text mode, it means we are potentially typing the file path
+            # or the very first word of the additional text without a preceding .md file.
+            # Prioritize file path suggestions for the current fragment.
+            
+            # Handle 'global/' prefix specifically
+            if 'global/'.startswith(current_fragment):
+                yield Completion('global/', start_position=-len(current_fragment))
 
-            if 'global/'.startswith(prefix):
-                yield Completion('global/', start_position=-len(prefix))
-
-            if prefix.startswith('global/'):
-                path_part = prefix[len('global/'):]
+            if current_fragment.startswith('global/'):
+                path_part = current_fragment[len('global/'):]
                 script_dir = os.path.dirname(os.path.realpath(__file__))
                 global_dir = os.path.join(script_dir, 'global_commands')
                 search_path = os.path.join(global_dir, path_part)
@@ -86,11 +125,26 @@ class PtkCompleter(Completer):
                 suggestions = self._get_filesystem_suggestions(search_path)
                 for s in suggestions:
                     rel_path = 'global/' + os.path.relpath(s, global_dir).replace('\\', '/')
-                    yield Completion(rel_path, start_position=-len(prefix))
+                    yield Completion(rel_path, start_position=-len(current_fragment))
+                if suggestions: return # If global file suggestions are found, stop here
             else:
-                suggestions = self._get_filesystem_suggestions(prefix)
+                # Try local file suggestions
+                suggestions = self._get_filesystem_suggestions(current_fragment)
                 for s in suggestions:
-                    yield Completion(s, start_position=-len(prefix))
+                    yield Completion(s, start_position=-len(current_fragment))
+                if suggestions: return # If local file suggestions are found, stop here
+            
+            # If no file suggestions were found (or applicable for the current fragment),
+            # then fall back to general word completion. This covers cases where the user
+            # starts typing additional text without an .md file, or just hits space after /pushContext
+            if current_fragment or input_after_command.endswith(' '):
+                recent_words = self.client.get_recent_words_for_completion(limit=200)
+                aimd_words = self.client.get_aimd_words_for_completion()
+                all_words = aimd_words + recent_words
+                seen = set()
+                matches = [w for w in all_words if w.lower().startswith(current_fragment.lower()) and not (w.lower() in seen or seen.add(w.lower()))]
+                for w in matches:
+                    yield Completion(w, start_position=-len(current_fragment))
             return
 
         # Handler for: /popContext <return_value>
