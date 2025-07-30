@@ -3,6 +3,7 @@ import sys
 import os
 from io import StringIO
 from pathlib import Path
+import difflib
 
 def run_bash_script(script: str) -> str:
     """Executes a bash script and captures its stdout and stderr."""
@@ -87,10 +88,28 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str, line_number: 
                 start = pos + len(new_str)
             replacements.append(f"{count} location(s)")
         else:
-            # Provide more debug info
-            return (f"String not found in file. Old string length: {len(old_str)}, " 
+            # Find longest matching substring using difflib
+            seq_matcher = difflib.SequenceMatcher(None, old_str, content)
+            match = seq_matcher.find_longest_match(0, len(old_str), 0, len(content))
+            
+            if match.size > 0:
+                longest_match = old_str[match.a:match.a + match.size]
+                context_start = max(0, match.b - 20)
+                context_end = min(len(content), match.b + match.size + 20)
+                context = content[context_start:context_end]
+                
+                # Create error message with context
+                return (
+                    f"String not found in file. Found longest match of {match.size} characters.\n"
+                    f"Longest match: {repr(longest_match)}\n"
+                    f"Context in file:\n{repr(context)}"
+                )
+            else:
+                return (
+                    f"String not found in file. Old string length: {len(old_str)}, " 
                     f"File length: {len(content)}, First 100 chars of old string: {repr(old_str[:100])}, "
-                    f"First 200 chars of file: {repr(content[:200])}")
+                    f"First 200 chars of file: {repr(content[:200])}"
+                )
         
         # Write changes
         with open(abs_path, 'w', newline='') as f:
