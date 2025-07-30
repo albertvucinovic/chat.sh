@@ -21,7 +21,14 @@ TOOLS = [
                                       "parameters": {"type": "object", "properties": {"return_value": {"type": "string"}}, "required": ["return_value"]}}},
     {"type": "function", "function": {
         "name": "str_replace_editor",
-        "description": "Replace specific text in files. Requires exact matches including whitespace.",
+        "description": """
+            Replace specific text in files. Requires exact matches including whitespace.
+            Requirements:
+            1) old_str MUST be the exact literal text to replace (including all whitespace, indentation, newlines, etc.)
+            2) new_str MUST be the exact literal text to replace old_str (also including all whitespace, indentation, newlines, etc.).
+            3) NEVER escape old_str of new_str, that would break the exact literal text requirement.
+            ***Important:*** If ANY of the above are not satisfied, the tool will fail.
+        """,
         "parameters": {
             "type": "object",
             "properties": {
