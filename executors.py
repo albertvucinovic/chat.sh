@@ -51,7 +51,7 @@ def run_python_script(script: str) -> str:
         sys.stdout, sys.stderr = old_stdout, old_stderr
         return f"--- STDERR ---\nError executing Python script: {e}"
 
-def str_replace_editor(file_path: str, old_str: str, new_str: str, line_number: int = None) -> str:
+def str_replace_editor(file_path: str, old_str: str, new_str: str) -> str:
     """Replace exact string match in file with optional line context"""
     try:
         # Convert to absolute path
@@ -140,3 +140,37 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str, line_number: 
         return f"Success! Replaced in {', '.join(replacements)}"
     except Exception as e:
         return f"Error: {str(e)}"
+
+def replace_lines(file_path: str, start_line: int, end_line: int, new_content: str) -> str:
+    """Replaces a specified range of lines in a file with new content."""
+    try:
+        abs_path = Path(file_path).resolve()
+        
+        # Basic validation for line numbers
+        if start_line <= 0 or end_line <= 0:
+            return "Error: Line numbers must be positive."
+        if start_line > end_line:
+            return "Error: start_line cannot be greater than end_line."
+
+        with open(abs_path, 'r', newline='') as f:
+            lines = f.readlines()
+        
+        # Adjust for 0-indexed list
+        start_idx = start_line - 1
+        end_idx = end_line - 1
+
+        if start_idx >= len(lines) or end_idx < 0:
+            return f"Error: Line range [{start_line}-{end_line}] is out of bounds for file with {len(lines)} lines."
+
+        # Replace the lines
+        new_lines = lines[:start_idx] + [line + '\n' for line in new_content.splitlines()] + lines[end_idx + 1:]
+        
+        with open(abs_path, 'w', newline='') as f:
+            f.writelines(new_lines)
+            
+        return f"Successfully replaced lines {start_line}-{end_line} in {file_path}."
+    except FileNotFoundError:
+        return f"Error: File not found at {file_path}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+

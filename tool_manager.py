@@ -31,6 +31,20 @@ TOOLS = [
             },
             "required": ["file_path", "old_str", "new_str"]
         }
+    }},
+    {"type": "function", "function": {
+        "name": "replace_lines",
+        "description": "Replaces a specified range of lines in a file with new content.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Path to the file."},
+                "start_line": {"type": "integer", "description": "The starting line number (1-indexed)."},
+                "end_line": {"type": "integer", "description": "The ending line number (1-indexed)."},
+                "new_content": {"type": "string", "description": "The new content to insert, replacing the specified line range."},
+            },
+            "required": ["file_path", "start_line", "end_line", "new_content"]
+        }
     }}
 ]
 
@@ -139,8 +153,14 @@ def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True
             output = str_replace_editor(
                 args.get("file_path"),
                 args.get("old_str"),
-                args.get("new_str"),
-                args.get("line_number")
+                args.get("new_str")
+            )
+        elif fn_name == "replace_lines":
+            output = replace_lines(
+                args.get("file_path"),
+                args.get("start_line"),
+                args.get("end_line"),
+                args.get("new_content")
             )
         else: output = f"Unknown tool: {fn_name}"
         client.console.print(Panel(Text(output), title="[bold green]Execution Output[/bold green]", border_style="green", box=client.boxStyle))
