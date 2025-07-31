@@ -2,7 +2,7 @@ import json
 import time
 import os
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple
 
 from executors import run_bash_script, run_python_script, str_replace_editor, replace_lines
 
@@ -126,8 +126,6 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
     else:
         launch_cmd = f"python3 -u '{chat_py}'"
 
-    # Build a command that sets env, cds, and runs the launcher via bash -lc
-    # tmux new-window will run: bash -lc '<cmd>'
     cmd = (
         f"cd '{parent_cwd}' && "
         f"EG_AGENT_DIR='{agent_dir}' EG_TREE_ID='{tree_id}' EG_PARENT_ID='{parent_id}' EG_AGENT_ID='{child_id}' "
@@ -135,9 +133,25 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
         f"bash -lc {launch_cmd}"
     )
 
-    # Use outer double-quotes for tmux, inner single-quotes for bash -lc
     tmux_cmd = f"tmux new-window -t {session} -n {child_id} \"bash -lc '{cmd}'\""
     run_bash_script(tmux_cmd)
+
+
+def _list_all_children_dirs(tree_id: str) -> List[Tuple[str, Path]]:
+    base = Path('.egg/agents') / tree_id
+    out: List[Tuple[str, Path]] = []
+    if not base.exists():
+        return out
+    for parent_dir in base.iterdir():
+        if not parent_dir.is_dir():
+            continue
+        children_root = parent_dir / 'children'
+        if not children_root.exists():
+            continue
+        for c in children_root.iterdir():
+            if c.is_dir():
+                out.append((c.name, c))
+    return out
 
 
 def tool_spawn_agent(args: Dict) -> str:
@@ -211,29 +225,26 @@ def tool_wait_agents(args: Dict) -> str:
     if not tree_id:
         return json.dumps({"error": "No tree context found"})
 
-    parent_id = os.environ.get('EG_AGENT_ID', 'root')
-    agent_root = Path('.egg/agents') / tree_id / parent_id / 'children'
-
     start = time.time()
     results: Dict[str, Any] = {}
 
     def finished(child_dir: Path) -> bool:
         return (child_dir / 'result.json').exists()
 
-    # Determine targets
+    # Figure out target children
+    all_children: List[Tuple[str, Path]] = _list_all_children_dirs(tree_id)
+    name_to_dir = {name: p for name, p in all_children}
+
     if isinstance(which, list):
-        target_ids = which
+        target_ids = [str(x) for x in which]
     elif which in ('all', 'any'):
-        if agent_root.exists():
-            target_ids = [d.name for d in agent_root.iterdir() if d.is_dir()]
-        else:
-            target_ids = []
+        target_ids = [name for name, _ in all_children]
     else:
         target_ids = [str(which)]
 
     pending = set(target_ids)
 
-    # If there are no targets and 'all' requested, return empty completion
+    # If 'all' requested and there are no children, return empty set
     if which == 'all' and not pending:
         return json.dumps({
             "completed": [],
@@ -243,8 +254,8 @@ def tool_wait_agents(args: Dict) -> str:
 
     while pending:
         for cid in list(pending):
-            cdir = agent_root / cid
-            if cdir.exists() and finished(cdir):
+            cdir = name_to_dir.get(cid)
+            if cdir and finished(cdir):
                 try:
                     results[cid] = _read_json(cdir / 'result.json')
                 except Exception:
@@ -257,6 +268,9 @@ def tool_wait_agents(args: Dict) -> str:
             break
         if timeout and (time.time() - start) > timeout:
             break
+        # Refresh child list in case new children were added during wait
+        all_children = _list_all_children_dirs(tree_id)
+        name_to_dir = {name: p for name, p in all_children}
         time.sleep(1)
 
     return json.dumps({
