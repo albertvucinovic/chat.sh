@@ -134,15 +134,25 @@ def _next_child_id(children_dir: Path, base: str) -> str:
     return f"{base}-{max_idx+1:03d}"
 
 
-def _parent_window_exists(session: str, parent_id: str) -> bool:
-    out = _tmux_raw(f"tmux list-windows -t {session} -F '#{{window_name}}'")
-    return parent_id in (out.split() if out else [])
+# Utilities for pane/window targeting
+
+def _window_of_pane(pane_id: str) -> str:
+    return _tmux_raw(f"tmux display -p -t {pane_id} '#{{window_id}}'")
 
 
-def _parent_window_setup(session: str, parent_id: str, parent_cwd: str):
-    if not _parent_window_exists(session, parent_id):
-        cmd = f"tmux new-window -t {session} -n {parent_id} \"bash -lc 'cd \"{parent_cwd}\"; bash'\""
-        run_bash_script(cmd)
+def _active_pane_in_window_id(window_id: str) -> str:
+    out = _tmux_raw("tmux list-panes -a -F '#{window_id} #{pane_id} #{pane_active}'")
+    if not out:
+        return ""
+    first = ""
+    for line in out.splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 3 and parts[0] == window_id:
+            if not first:
+                first = parts[1]
+            if parts[2] == '1':
+                return parts[1]
+    return first
 
 
 def _read_parent_pane_id(tree_id: str, parent_id: str) -> str:
@@ -155,6 +165,20 @@ def _read_parent_pane_id(tree_id: str, parent_id: str) -> str:
     return ""
 
 
+def _write_parent_right_column_pane(tree_id: str, parent_id: str, right_pane_id: str):
+    p = Path('.egg/agents') / tree_id / parent_id / 'state.json'
+    st = _read_json(p) or {}
+    st['right_column_pane_id'] = right_pane_id
+    _write_json(p, st)
+
+
+def _read_parent_right_column_pane(tree_id: str, parent_id: str) -> str:
+    p = Path('.egg/agents') / tree_id / parent_id / 'state.json'
+    st = _read_json(p) or {}
+    v = st.get('right_column_pane_id')
+    return v if isinstance(v, str) else ""
+
+
 def _write_child_pane_id(tree_id: str, parent_id: str, child_id: str, pane_id: str):
     p = Path('.egg/agents') / tree_id / parent_id / 'children' / child_id / 'state.json'
     st = _read_json(p) or {}
@@ -162,34 +186,45 @@ def _write_child_pane_id(tree_id: str, parent_id: str, child_id: str, pane_id: s
     _write_json(p, st)
 
 
-def _active_pane_in_window(session: str, window: str) -> str:
-    out = _tmux_raw(f"tmux list-panes -t {session}:{window} -F '#{{pane_id}} #{{pane_active}}'")
-    if not out:
+def _split_h(target_pane: str) -> str:
+    run_bash_script(f"tmux split-window -h -t {target_pane}")
+    return _tmux_raw("tmux display-message -p '#{pane_id}'")
+
+
+def _split_v(target_pane: str) -> str:
+    run_bash_script(f"tmux split-window -v -t {target_pane}")
+    return _tmux_raw("tmux display-message -p '#{pane_id}'")
+
+
+# Spawning logic per requirements
+
+def _spawn_into_parent_layer(session: str, tree_id: str, parent_id: str, run_script: str) -> str:
+    parent_pane = _read_parent_pane_id(tree_id, parent_id)
+    if not parent_pane:
+        # Try fallback: the active pane of the current tmux client
+        parent_pane = _tmux_raw("tmux display-message -p '#{pane_id}'")
+        if not parent_pane:
+            # Last-ditch: try first pane in the first window of session
+            out = _tmux_raw(f"tmux list-panes -t {session} -F '#{{pane_id}}' | head -n1")
+            parent_pane = out.splitlines()[0].strip() if out else ""
+    if not parent_pane:
         return ""
-    for line in out.splitlines():
-        parts = line.strip().split()
-        if len(parts) >= 2 and parts[1] == '1':
-            return parts[0]
-    # fallback to first pane id
-    first = out.splitlines()[0].strip().split()[0]
-    return first
 
+    # Check if a right column already exists for this parent
+    right_col = _read_parent_right_column_pane(tree_id, parent_id)
+    if not right_col:
+        # First child in this layer: vertical split to create right column
+        right_col = _split_h(parent_pane)
+        # Persist right column pane id in parent state
+        _write_parent_right_column_pane(tree_id, parent_id, right_col)
+        target_for_child = right_col
+    else:
+        # Subsequent child: stack within right column by horizontal split
+        target_for_child = _split_v(right_col)
 
-def _split_specific_pane_right_and_get_new(pane_id: str) -> str:
-    # Split horizontally this exact pane; tmux focuses the new right pane
-    run_bash_script(f"tmux split-window -h -t {pane_id}")
-    new_pane = _tmux_raw("tmux display-message -p '#{pane_id}'")
-    return new_pane
-
-
-def _spawn_in_specific_parent_pane(session: str, parent_window: str, parent_pane_id: str, run_script: str) -> str:
-    run_bash_script(f"tmux select-window -t {session}:{parent_window}")
-    target = parent_pane_id
-    if not target:
-        target = _active_pane_in_window(session, parent_window)
-    new_pane = _split_specific_pane_right_and_get_new(target)
-    run_bash_script(f"tmux send-keys -t {new_pane} '{run_script}' C-m")
-    return new_pane
+    # Send child start command to the target pane
+    run_bash_script(f"tmux send-keys -t {target_for_child} '{run_script}' C-m")
+    return target_for_child
 
 
 def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, tree_id: str, parent_id: str):
@@ -220,12 +255,12 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
 
     run_cmd = str(run_sh_path)
 
-    _parent_window_setup(session, parent_id, parent_cwd)
+    # Spawn strictly by pane, never switching/creating windows
+    child_pane = _spawn_into_parent_layer(session, tree_id, parent_id, run_cmd)
 
-    parent_pane_id = _read_parent_pane_id(tree_id, parent_id)
-    new_pane = _spawn_in_specific_parent_pane(session, parent_id, parent_pane_id, run_cmd)
-
-    _write_child_pane_id(tree_id, parent_id, child_id, new_pane)
+    # Persist the new child's pane id so it can act as parent later
+    if child_pane:
+        _write_child_pane_id(tree_id, parent_id, child_id, child_pane)
 
 
 def tool_spawn_agent(args: Dict) -> str:
