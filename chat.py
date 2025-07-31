@@ -140,6 +140,59 @@ def main():
                     console.print("[yellow]Empty bash command, skipping.[/yellow]")
                 continue
 
+            elif user_input.startswith("o "):
+                client.messages.append({"role": "user", "content": user_input})
+                chat_name = user_input[2:].strip()
+                if chat_name:
+                    client.load_chat(chat_name)
+                else:
+                    console.print("[yellow]No chat file specified.[/yellow]")
+                continue
+
+            elif user_input.startswith("/model"):
+                client.messages.append({"role": "user", "content": user_input})
+                model_key = user_input[len("/model"):].strip()
+                client.switch_model(model_key)
+                continue
+
+            elif user_input.startswith("/pushContext"):
+                client.messages.append({"role": "user", "content": user_input})
+                match = re.match(r"/pushContext\s*(\S+\.md)?\s*(.*)", user_input)
+                if match:
+                    file_path = match.group(1)
+                    additional_text = match.group(2).strip()
+                    if file_path or additional_text:
+                        result = client.push_context(file_path, additional_text)
+                        console.print(Panel(
+                            result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan", box=client.boxStyle))
+                        if not result.startswith("Error:"):
+                            client.send_message("")
+                    else:
+                        console.print("[yellow]Usage: /pushContext [<file_path.md>] [<additional_text>][/yellow]")
+                else:
+                    console.print("[yellow]Usage: /pushContext [<file_path.md>] [<additional_text>][/yellow]")
+                continue
+
+            elif user_input.startswith("/popContext"):
+                client.messages.append({"role": "user", "content": user_input})
+                return_value = user_input[len("/popContext"):].strip()
+                if return_value:
+                    result = client.pop_context(return_value)
+                    console.print(Panel(
+                        result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan", box=client.boxStyle))
+                else:
+                    console.print("[yellow]Usage: /popContext <return_value>[/yellow]")
+                continue
+
+            elif user_input.startswith("/toggleYesToolFlag"):
+                client.yesToolFlag = not client.yesToolFlag
+                print("TOOL CALLS WILL AUTOMATICALLY GO THROUGH" if client.yesToolFlag else "Tool calls need confirmation")
+                continue
+
+            elif user_input.startswith("/toggleThinkingDisplay"):
+                client.toggle_thinking_display()
+                continue
+
             elif user_input.startswith("/spawn"):
                 client.messages.append({"role": "user", "content": user_input})
                 match = re.match(r"/spawn\s*(\S+\.md)?\s*(.*)", user_input)
@@ -183,20 +236,6 @@ def main():
                     client.send_message(tool_call_json)
                 continue
 
-            elif user_input.startswith("/wait "):
-                payload = user_input[len("/wait "):].strip()
-                client.messages.append({"role": "user", "content": user_input})
-                if payload.startswith('{') or payload.startswith('['):
-                    args = payload
-                else:
-                    args = json.dumps({"which": payload})
-                tool_call_json = json.dumps({
-                    "tool_calls": [
-                        {"type": "function", "function": {"name": "wait_agents", "arguments": args}}
-                    ]
-                })
-                client.send_message(tool_call_json)
-                continue
             elif user_input.startswith("/wait "):
                 payload = user_input[len("/wait "):].strip()
                 client.messages.append({"role": "user", "content": user_input})
