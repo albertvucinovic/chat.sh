@@ -1,7 +1,7 @@
-import sys
 import os
 import re
 import json
+import sys
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -12,7 +12,6 @@ from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from chat_client import ChatClient
 from completer import PtkCompleter
 from executors import run_bash_script
-import tool_manager
 
 
 def main():
@@ -77,12 +76,18 @@ def main():
             "[bold]/pushContext <context_or_file.md>[/bold] - Push current chat and start new context.\n"
             "[bold]/popContext <return_value>[/bold] - Pop context from stack and return to previous.\n"
             "[bold]/spawn <file.md?> <text>[/bold] - Spawn child like pushContext.\n"
-            "[bold]/wait <child_id|all|any>[/bold] - Wait for child agents.\n"
+            "[bold]/wait <child_id|all|any or space-separated list>[/bold] - Wait for child agents.\n"
             "[bold]/tree[/bold] - List children of current agent.  [bold]/attach <tree_id?> [agent_id?][/bold] - Attach tmux.\n",
             title="[bold]Welcome[/bold]",
             border_style=client.get_border_style("magenta")
         )
     )
+
+    def shutdown():
+        console.print("\n\n[bold yellow]Saving chat and exiting...[/bold yellow]")
+        saved_path = client.save_chat()
+        console.print(f"[green]Chat saved to:[/green] {saved_path}")
+        sys.exit(0)
 
     # Auto-inject initial context for child agents
     try:
@@ -93,19 +98,14 @@ def main():
             with open(init_ctx_file, 'r', encoding='utf-8') as f:
                 init_text = f.read().strip()
             if init_text:
-                client.messages.append({"role": "user", "content": init_text})
+                instruction = "[SYSTEM NOTE: When you finish, call popContext with a concise return value (e.g., a path to your output or a short summary).]"
+                client.messages.append({"role": "user", "content": f"{instruction}\n\n{init_text}"})
                 client.send_message("")
                 if consumed_marker:
                     with open(consumed_marker, 'w') as cf:
                         cf.write('1')
     except Exception:
         pass
-
-    def shutdown():
-        console.print("\n\n[bold yellow]Saving chat and exiting...[/bold yellow]")
-        saved_path = client.save_chat()
-        console.print(f"[green]Chat saved to:[/green] {saved_path}")
-        sys.exit(0)
 
     while True:
         try:
@@ -205,11 +205,11 @@ def main():
                     label = (additional_text.split()[:1] or ["child"])[0]
 
                 try:
-                    result_json = tool_manager.tool_spawn_agent({"context_text": context_text, "label": label})
+                    from tool_manager import tool_spawn_agent
+                    result_json = tool_spawn_agent({"context_text": context_text, "label": label})
                     console.print(Panel(Text(result_json), title="[bold green]Spawned Agent[/bold green]", border_style="green", box=client.boxStyle))
                     client.messages.append({"role": "tool", "name": "spawn_agent", "tool_call_id": f"local_{label}", "content": result_json})
-                except Exception as e:
-                    console.print(f"[red]Local spawn failed: {e}. Falling back to tool call...[/red]")
+                except Exception:
                     tool_call_json = json.dumps({
                         "tool_calls": [
                             {"type": "function", "function": {"name": "spawn_agent", "arguments": json.dumps({"context_text": context_text, "label": label})}}
@@ -218,13 +218,17 @@ def main():
                     client.send_message(tool_call_json)
                 continue
 
-            elif user_input.startswith("/wait "):
-                payload = user_input[len("/wait "):].strip()
+            elif user_input.startswith("/wait"):
+                rest = user_input[len("/wait"):].strip()
                 client.messages.append({"role": "user", "content": user_input})
-                if payload.startswith('{') or payload.startswith('['):
-                    args = payload
+                if not rest:
+                    args = json.dumps({"which": "all"})
                 else:
-                    args = json.dumps({"which": payload})
+                    parts = rest.split()
+                    if len(parts) == 1:
+                        args = json.dumps({"which": parts[0]})
+                    else:
+                        args = json.dumps({"which": parts})
                 tool_call_json = json.dumps({
                     "tool_calls": [
                         {"type": "function", "function": {"name": "wait_agents", "arguments": args}}
