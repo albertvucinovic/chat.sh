@@ -122,6 +122,7 @@ def main():
             "[bold]/pushContext <context_or_file.md>[/bold] - Push current chat and start new context.\n"
             "[bold]/popContext <return_value>[/bold] - Pop context from stack and return to previous. For subagents: finalize and return result to parent.\n"
             "[bold]/spawn <file.md?> <text>[/bold] - Spawn child like pushContext.\n"
+            "[bold]/spawn_auto <file.md?> <text>[/bold] - Spawn child with auto tool-approval.\n"
             "[bold]/wait <child_id|space-separated list>|any|all[/bold] - Wait for specific child agents, any, or all.\n"
             "[bold]/tree[/bold] - List children in current tree.  [bold]/attach <tree_id?> [agent_id?][/bold] - Attach tmux.\n"
             "[bold]/tree use <tree_id>[/bold] - Switch active agent tree for this session.  [bold]/tree list[/bold] - List existing trees.\n"
@@ -279,6 +280,52 @@ def main():
                     result_json = tool_spawn_agent({"context_text": context_text, "label": label})
                     console.print(Panel(Text(result_json), title="[bold green]Spawned Agent[/bold green]", border_style="green", box=client.boxStyle))
                     client.messages.append({"role": "tool", "name": "spawn_agent", "tool_call_id": f"local_{label}", "content": result_json})
+                except Exception as e:
+                    console.print(Panel(f"Spawn failed: {e}", title="[bold red]Spawn Error[/bold red]", border_style="red", box=client.boxStyle))
+                continue
+
+            elif user_input.startswith("/spawn_auto"):
+                # Always handle /spawn_auto locally. Do not fallback to model tool-call on errors.
+                client.messages.append({"role": "user", "content": user_input})
+                match = re.match(r"/spawn_auto\s*(\S+\.md)?\s*(.*)", user_input)
+                if not match:
+                    console.print("[yellow]Usage: /spawn_auto [<file_path.md>] [<additional_text>] [/yellow]")
+                    continue
+                file_path = match.group(1)
+                additional_text = match.group(2).strip()
+                context_parts = []
+                label = None
+                if file_path:
+                    try:
+                        if file_path.startswith("global/"):
+                            script_dir = os.path.dirname(os.path.realpath(__file__))
+                            fp = os.path.join(script_dir, 'global_commands', file_path[len('global/'):])
+                        else:
+                            fp = file_path
+                        with open(fp, 'r', encoding='utf-8') as f:
+                            context_parts.append(f.read())
+                        label = os.path.splitext(os.path.basename(file_path))[0]
+                    except Exception as e:
+                        console.print(f"[red]Error reading file: {e}[/red]")
+                        continue
+                if additional_text:
+                    context_parts.append(additional_text)
+                # Append finishing instruction after content
+                finishing_instruction = "[SYSTEM NOTE] You are a subagent. When you finish your task, you MUST call the /popContext command with a concise return value (e.g., a path to your output or a short summary). Example: /popContext ./output.md"
+                context_parts.append(finishing_instruction)
+                context_text = "\n\n".join(context_parts).strip()
+                if not context_text:
+                    console.print("[yellow]Usage: /spawn_auto [<file_path.md>] [<additional_text>] [/yellow]")
+                    continue
+                if not label:
+                    label = (additional_text.split()[:1] or ["child"])[0]
+
+                # Always use local tool spawn; on error, report and continue without involving model
+                try:
+                    from tool_manager import tool_spawn_agent_auto
+                    result_json = tool_spawn_agent_auto({"context_text": context_text, "label": label})
+                    console.print(Panel(Text(result_json), title="[bold green]Spawned Agent (auto)[/bold green]", border_style="green", box=client.boxStyle))
+                    client.messages.append({"role": "tool", "name": "spawn_agent_auto", "tool_call_id": f"local_{label}_auto", "content": result_json})
                 except Exception as e:
                     console.print(Panel(f"Spawn failed: {e}", title="[bold red]Spawn Error[/bold red]", border_style="red", box=client.boxStyle))
                 continue

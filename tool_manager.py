@@ -3,7 +3,7 @@ import time
 import os
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 
 from executors import run_bash_script, run_python_script, str_replace_editor, replace_lines
 
@@ -46,6 +46,18 @@ TOOLS = [
     {"type": "function", "function": {
         "name": "spawn_agent",
         "description": "Spawn a single child agent using current CWD as working dir. Returns {tree_id,parent_id,child_id,dir,session}.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "context_text": {"type": "string"},
+                "label": {"type": "string"}
+            },
+            "required": ["context_text"]
+        }
+    }},
+    {"type": "function", "function": {
+        "name": "spawn_agent_auto",
+        "description": "Spawn a single child agent using current CWD as working dir with auto-approval for tool calls (EG_YES_TOOL_FLAG=1). Returns {tree_id,parent_id,child_id,dir,session}.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -241,7 +253,7 @@ def _spawn_into_parent_layer(session: str, tree_id: str, parent_id: str, run_scr
     return target_for_child
 
 
-def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, tree_id: str, parent_id: str):
+def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, tree_id: str, parent_id: str, extra_env: Optional[dict] = None):
     repo_root = Path(__file__).resolve().parent
     chat_sh = (repo_root / 'chat.sh').resolve()
     chat_py = (repo_root / 'chat.py').resolve()
@@ -320,7 +332,7 @@ def tool_spawn_agent(args: Dict) -> str:
     (child_dir / 'init_context.txt').write_text(context_text or '', encoding='utf-8')
 
     session = _ensure_session(tree_id)
-    _launch_child(session, parent_cwd, str(child_dir), child_id, tree_id, parent_id)
+    _launch_child(session, parent_cwd, str(child_dir), child_id, tree_id, parent_id, extra_env=None)
 
     return json.dumps({
         "tree_id": tree_id,
@@ -536,6 +548,8 @@ def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True
             output = tool_write_result(args)
         elif fn_name == "list_agents":
             output = tool_list_agents(args)
+        elif fn_name == "spawn_agent_auto":
+            output = tool_spawn_agent_auto(args)
         else:
             output = f"Unknown tool: {fn_name}"
 
@@ -580,3 +594,58 @@ def tool_list_agents(args: Dict) -> str:
         if children:
             listing[parent_id] = children
     return json.dumps({"tree_id": tree_id, "parents": listing}, indent=2)
+
+
+
+def tool_spawn_agent_auto(args: Dict) -> str:
+    context_text = args.get('context_text', '').strip()
+    label = (args.get('label') or 'child').strip() or 'child'
+
+    tree_id = os.environ.get('EG_TREE_ID')
+    if not tree_id:
+        current = Path('.egg/agents/.current_tree')
+        if current.exists():
+            try:
+                tree_id = current.read_text().strip()
+            except Exception:
+                tree_id = None
+    if not tree_id:
+        tree_id = str(int(time.time()))
+        Path('.egg/agents').mkdir(parents=True, exist_ok=True)
+        Path('.egg/agents/.current_tree').write_text(tree_id)
+
+    parent_id = os.environ.get('EG_AGENT_ID', 'root')
+    parent_cwd = str(Path.cwd())
+
+    base_dir = Path('.egg/agents') / tree_id / parent_id / 'children'
+    base_dir.mkdir(parents=True, exist_ok=True)
+    child_id = _next_child_id(base_dir, label)
+    child_dir = base_dir / child_id
+    child_dir.mkdir(parents=True, exist_ok=True)
+
+    state = {
+        "agent_id": child_id,
+        "parent_id": parent_id,
+        "status": "active",
+        "model_key": "",
+        "spawned_at": int(time.time()),
+        "children": [],
+        "cwd": str(parent_cwd)
+    }
+    _write_json(child_dir / 'state.json', state)
+    _write_json(child_dir / 'messages.json', [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": context_text}
+    ])
+    (child_dir / 'init_context.txt').write_text(context_text or '', encoding='utf-8')
+
+    session = _ensure_session(tree_id)
+    _launch_child(session, parent_cwd, str(child_dir), child_id, tree_id, parent_id, extra_env={"EG_YES_TOOL_FLAG": "1"})
+
+    return json.dumps({
+        "tree_id": tree_id,
+        "parent_id": parent_id,
+        "child_id": child_id,
+        "dir": str(child_dir),
+        "session": session
+    }, indent=2)

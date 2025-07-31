@@ -56,6 +56,13 @@ class ChatClient:
         self.aimd_content: str = ""
         self.boxStyle = box.ROUNDED
         self.yesToolFlag = False
+        # Enable auto tool-call approval for subagents spawned with EG_YES_TOOL_FLAG
+        try:
+            env_flag = os.environ.get("EG_YES_TOOL_FLAG", "").strip().lower()
+            if env_flag in ("1", "true", "yes", "on"):
+                self.yesToolFlag = True
+        except Exception:
+            pass
         self.show_thinking = True
         self.in_single_turn_auto_execute_calls = False
 
