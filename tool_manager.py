@@ -201,6 +201,7 @@ def _split_h(target_pane: str) -> str:
 
 def _split_v(target_pane: str) -> str:
     run_bash_script(f"tmux split-window -v -t {target_pane}")
+    run_bash_script(f"tmux select-layout -E")
     return _tmux_raw("tmux display-message -p '#{pane_id}'")
 
 
