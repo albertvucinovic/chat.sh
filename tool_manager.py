@@ -1,6 +1,7 @@
 import json
 import time
 import os
+import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
@@ -92,6 +93,14 @@ TOOLS = [
 ]
 
 
+def _tmux_raw(cmd: str) -> str:
+    try:
+        res = subprocess.run(cmd, shell=True, executable="/bin/bash", capture_output=True, text=True, timeout=10)
+        return (res.stdout or "").strip()
+    except Exception:
+        return ""
+
+
 def _ensure_session(tree_id: str) -> str:
     session = f"egg-tree-{tree_id}"
     run_bash_script(f"tmux has-session -t {session} 2>/dev/null || tmux new-session -d -s {session} 'bash'")
@@ -126,8 +135,8 @@ def _next_child_id(children_dir: Path, base: str) -> str:
 
 
 def _parent_window_exists(session: str, parent_id: str) -> bool:
-    out = run_bash_script(f"tmux list-windows -t {session} -F '#{{window_name}}' | grep -Fx '{parent_id}' || true")
-    return parent_id in out.split()
+    out = _tmux_raw(f"tmux list-windows -t {session} -F '#{{window_name}}'")
+    return parent_id in (out.split() if out else [])
 
 
 def _parent_window_setup(session: str, parent_id: str, parent_cwd: str):
@@ -136,46 +145,51 @@ def _parent_window_setup(session: str, parent_id: str, parent_cwd: str):
         run_bash_script(cmd)
 
 
-def _right_pane_id(session: str, window: str) -> str:
-    info = run_bash_script(f"tmux list-panes -t {session}:{window} -F '#{{pane_id}} #{{pane_index}} #{{pane_right}}'")
-    right_id = None
-    highest_id = None
-    highest_idx = -1
-    for line in info.strip().splitlines():
+def _read_parent_pane_id(tree_id: str, parent_id: str) -> str:
+    p = Path('.egg/agents') / tree_id / parent_id / 'state.json'
+    st = _read_json(p)
+    if isinstance(st, dict):
+        pid = st.get('pane_id')
+        if isinstance(pid, str) and pid:
+            return pid
+    return ""
+
+
+def _write_child_pane_id(tree_id: str, parent_id: str, child_id: str, pane_id: str):
+    p = Path('.egg/agents') / tree_id / parent_id / 'children' / child_id / 'state.json'
+    st = _read_json(p) or {}
+    st['pane_id'] = pane_id
+    _write_json(p, st)
+
+
+def _active_pane_in_window(session: str, window: str) -> str:
+    out = _tmux_raw(f"tmux list-panes -t {session}:{window} -F '#{{pane_id}} #{{pane_active}}'")
+    if not out:
+        return ""
+    for line in out.splitlines():
         parts = line.strip().split()
-        if len(parts) >= 3:
-            pid, idx_str, right = parts[0], parts[1], parts[2]
-            try:
-                idx = int(idx_str)
-            except Exception:
-                idx = -1
-            if highest_id is None or idx > highest_idx:
-                highest_id = pid
-                highest_idx = idx
-            if right == '1':
-                right_id = pid
-    return right_id or highest_id
+        if len(parts) >= 2 and parts[1] == '1':
+            return parts[0]
+    # fallback to first pane id
+    first = out.splitlines()[0].strip().split()[0]
+    return first
 
 
-def _spawn_in_right_column(session: str, window: str, run_script: str, make_right_if_missing: bool, first_on_right: bool):
-    if make_right_if_missing:
-        try:
-            pane_count_out = run_bash_script(f"tmux list-panes -t {session}:{window} | wc -l")
-            pane_count = int(pane_count_out.strip().split()[-1])
-        except Exception:
-            pane_count = 1
-        if pane_count <= 1:
-            run_bash_script(f"tmux select-window -t {session}:{window} && tmux split-window -h -t {session}:{window}")
-    right_pid = _right_pane_id(session, window)
-    if not right_pid:
-        run_bash_script(f"tmux select-window -t {session}:{window} && tmux split-window -h -t {session}:{window}")
-        right_pid = _right_pane_id(session, window)
+def _split_specific_pane_right_and_get_new(pane_id: str) -> str:
+    # Split horizontally this exact pane; tmux focuses the new right pane
+    run_bash_script(f"tmux split-window -h -t {pane_id}")
+    new_pane = _tmux_raw("tmux display-message -p '#{pane_id}'")
+    return new_pane
 
-    if first_on_right:
-        run_bash_script(f"tmux send-keys -t {right_pid} '{run_script}' C-m")
-    else:
-        run_bash_script(f"tmux split-window -v -t {right_pid}")
-        run_bash_script(f"tmux send-keys -t {session}:{window} '{run_script}' C-m")
+
+def _spawn_in_specific_parent_pane(session: str, parent_window: str, parent_pane_id: str, run_script: str) -> str:
+    run_bash_script(f"tmux select-window -t {session}:{parent_window}")
+    target = parent_pane_id
+    if not target:
+        target = _active_pane_in_window(session, parent_window)
+    new_pane = _split_specific_pane_right_and_get_new(target)
+    run_bash_script(f"tmux send-keys -t {new_pane} '{run_script}' C-m")
+    return new_pane
 
 
 def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, tree_id: str, parent_id: str):
@@ -204,23 +218,14 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
     run_sh_path.write_text("\n".join(run_lines) + "\n", encoding='utf-8')
     os.chmod(run_sh_path, 0o755)
 
-    # The command to send to tmux is simply the path to run.sh
     run_cmd = str(run_sh_path)
 
     _parent_window_setup(session, parent_id, parent_cwd)
 
-    pane_count_out = run_bash_script(f"tmux list-panes -t {session}:{parent_id} | wc -l")
-    try:
-        pane_count = int(pane_count_out.strip().split()[-1])
-    except Exception:
-        pane_count = 1
+    parent_pane_id = _read_parent_pane_id(tree_id, parent_id)
+    new_pane = _spawn_in_specific_parent_pane(session, parent_id, parent_pane_id, run_cmd)
 
-    if pane_count <= 1:
-        _spawn_in_right_column(session, parent_id, run_cmd, make_right_if_missing=True, first_on_right=True)
-    elif pane_count == 2:
-        _spawn_in_right_column(session, parent_id, run_cmd, make_right_if_missing=False, first_on_right=False)
-    else:
-        _spawn_in_right_column(session, parent_id, run_cmd, make_right_if_missing=False, first_on_right=False)
+    _write_child_pane_id(tree_id, parent_id, child_id, new_pane)
 
 
 def tool_spawn_agent(args: Dict) -> str:
