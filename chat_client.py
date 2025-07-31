@@ -112,7 +112,12 @@ class ChatClient:
         self.original_system_prompt = system_prompt_string
 
     def _clear_display(self):
-        self.console.print("\033[2J\033[H", end="")
+        # Avoid clearing the screen in tmux; use a visual separator to keep scrollback intact
+        try:
+            self.console.rule("[dim]Context Switch[/dim]")
+        except Exception:
+            # Fallback to a simple separator if rule is unavailable
+            self.console.print("\n" + ("-" * 40) + "\n")
 
     def push_context(self, file_path: Optional[str] = None, additional_text: str = "") -> str:
         """Save current chat and start completely fresh context, possibly from a file, with additional text."""

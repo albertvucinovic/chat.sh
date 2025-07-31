@@ -35,20 +35,20 @@ class DisplayManager:
                 model_name = msg.get("model_key", self.client.current_model_key)
                 title = f"[bold green]You & {model_name}[/bold green]"
                 border_style = "green"
-                content_renderable = Text(msg.get("content", "") or "[No content]")
-                self.console.print(Panel(content_renderable, title=title, border_style=border_style, box=self.client.boxStyle))
+                content_renderable = Text(msg.get("content", "") or "[No content]", no_wrap=False, overflow="fold")
+                self.console.print(Panel(content_renderable, title=title, border_style=border_style, box=self.client.boxStyle), crop=False)
 
             elif role == "assistant":
                 self.console.print(self._create_assistant_panel(msg))
 
             elif role == "tool":
-                output_renderable = Text(msg.get("content", "") or "[No output]")
+                output_renderable = Text(msg.get("content", "") or "[No output]", no_wrap=False, overflow="fold")
                 self.console.print(Panel(
                     output_renderable,
                     title=f"[bold green]Tool Output: {msg.get('name', 'N/A')}[/bold green]",
                     border_style="green",
                     box=self.client.boxStyle
-                ))
+                ), crop=False)
                 # Special pretty summary for wait_agents
                 try:
                     if msg.get('name') == 'wait_agents':
@@ -70,11 +70,11 @@ class DisplayManager:
                                 lines.append(line)
                             if lines:
                                 self.console.print(Panel(
-                                    Text("\n".join(lines)),
+                                    Text("\n".join(lines), no_wrap=False, overflow="fold"),
                                     title="[bold cyan]Wait Results[/bold cyan]",
                                     border_style=self.get_border_style("cyan"),
                                     box=self.client.boxStyle
-                                ))
+                                ), crop=False)
                 except Exception:
                     pass
                 # Pretty summary for list_agents
@@ -96,11 +96,11 @@ class DisplayManager:
                                     lines.append(line)
                             if lines:
                                 self.console.print(Panel(
-                                    Text("\n".join(lines)),
+                                    Text("\n".join(lines), no_wrap=False, overflow="fold"),
                                     title="[bold cyan]Agent Tree[/bold cyan]",
                                     border_style=self.get_border_style("cyan"),
                                     box=self.client.boxStyle
-                                ))
+                                ), crop=False)
                 except Exception:
                     pass
         except Exception as e:
@@ -117,7 +117,7 @@ class DisplayManager:
         title = f"[bold cyan]Assistant ({model_name})[/bold cyan]"
 
         if content:
-            renderables.append(Text(content, justify="left"))
+            renderables.append(Text(content, justify="left", no_wrap=False, overflow="fold"))
 
         if tool_calls:
             for tc in tool_calls:
@@ -127,14 +127,14 @@ class DisplayManager:
                     script = json.loads(args_str or '{}').get('script', args_str)
                     lang = name if name in ["python", "bash"] else "json"
                     renderables.append(Panel(
-                        Syntax(script, lang, theme="monokai", line_numbers=self.client.borders_enabled),
+                        Syntax(script, lang, theme="monokai", line_numbers=self.client.borders_enabled, word_wrap=True),
                         title=f"[bold yellow]Tool Call: {name}[/bold yellow]",
                         border_style="yellow",
                         box=self.client.boxStyle
                     ))
                 except (json.JSONDecodeError, AttributeError):
                     renderables.append(Panel(
-                        Text(args_str),
+                        Text(args_str, no_wrap=False, overflow="fold"),
                         title=f"[bold yellow]Tool Call: {name}[/bold yellow]",
                         border_style="yellow",
                         box=self.client.boxStyle
@@ -157,7 +157,7 @@ class DisplayManager:
         # 1. Add the Reasoning panel only if it has content and the setting is enabled.
         if self.client.show_thinking and reasoning:
             renderables.append(Panel(
-                Text(reasoning, justify="left"),
+                Text(reasoning, justify="left", no_wrap=False, overflow="fold"),
                 title="[bold magenta]Reasoning[/bold magenta]",
                 border_style="magenta",
                 box=self.client.boxStyle
