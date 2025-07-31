@@ -16,7 +16,7 @@ class PtkCompleter(Completer):
     def __init__(self, client: "ChatClient"):
         self.client = client
         self.all_commands = [
-            "/model", "/pushContext", "/popContext", "/toggleYesToolFlag", "/toggleThinkingDisplay", "o", "b", "/replace_lines", "/spawn", "/wait", "/tree", "/attach"
+            "/model", "/pushContext", "/popContext", "/toggleYesToolFlag", "/toggleThinkingDisplay", "/o", "/b", "/replace_lines", "/spawn", "/wait", "/tree", "/attach"
         ]
 
     def _get_filesystem_suggestions(self, prefix: str) -> List[str]:
@@ -43,23 +43,36 @@ class PtkCompleter(Completer):
         text = document.text_before_cursor
         words = text.split(' ')
 
-        # Handler for: o <chat_file>
-        if text.startswith("o "):
-            prefix = text[len("o "):]
-            suggestions = set()
+        # Handler for: /o <tree_id>|list
+        if text.startswith("/o"):
+            parts = text.split()
+            # Suggest subcommands or tree ids
+            base = Path('.egg/agents')
             try:
-                local_chats_dir = Path.cwd() / ".egg/localChats"
-                if local_chats_dir.is_dir():
-                    chat_files = [f.name for f in local_chats_dir.iterdir()
-                                  if f.name.startswith(prefix) and f.suffix == ".json"]
-                    for f_name in chat_files:
-                        suggestions.add(f_name)
-            except OSError:
-                pass
+                trees = []
+                if base.is_dir():
+                    trees = [d.name for d in base.iterdir() if d.is_dir() and d.name != '.current_tree']
+            except Exception:
+                trees = []
 
-            for s in sorted(list(suggestions), reverse=True):
-                yield Completion(s, start_position=-len(prefix))
-            return
+            if text == "/o" or text == "/o ":
+                # Offer list and tree ids
+                yield Completion("list", start_position=0)
+                for t in sorted(trees):
+                    yield Completion(t, start_position=0)
+                return
+
+            if text.startswith("/o list"):
+                # Nothing more to complete after list
+                return
+
+            # Completing tree ids after "/o "
+            if text.startswith("/o "):
+                prefix = text[len("/o "):]
+                for t in sorted(trees):
+                    if t.startswith(prefix):
+                        yield Completion(t, start_position=-len(prefix))
+                return
 
         # Handler for: /model <model_key>
         elif text.startswith("/model "):
@@ -265,7 +278,7 @@ class PtkCompleter(Completer):
             if suggestions:
                 return
 
-        if not text.strip().startswith(('/', 'o ', 'b ', '/model ', '/pushContext ', '/popContext ')):
+        if not text.strip().startswith(('/', '/o ', 'b ', '/model ', '/pushContext ', '/popContext ')):
             line = document.text_before_cursor
             m = re.search(r'(\w{3,})$', line)
             if m:
