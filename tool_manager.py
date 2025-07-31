@@ -57,11 +57,11 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "wait_agents",
-        "description": "Wait for the specified list of children to finish. Pass an empty list to wait for all current children. Optional timeout_sec. Supports any_mode to return when any completes.",
+        "description": "Wait for the specified list of child subagent IDs (strings) to finish. Pass an empty list to wait for all current children. Optional timeout_sec. Supports any_mode to return when any completes.",
         "parameters": {
             "type": "object",
             "properties": {
-                "which": {"type": "array", "items": {}},
+                "which": {"type": "array", "items": {"type": "string"}},
                 "timeout_sec": {"type": "integer"},
                 "any_mode": {"type": "boolean"}
             },
