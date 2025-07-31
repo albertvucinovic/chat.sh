@@ -143,42 +143,6 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
     )
     run_bash_script(f"tmux new-window -t {session} -n {child_id} 'bash -lc \"{cmd}\"'")
 
-    parent_id = os.environ.get('EG_AGENT_ID', 'root')
-    agent_root = Path('.egg/agents') / tree_id / parent_id / 'children'
-
-    start = time.time()
-    results: Dict[str, Any] = {}
-
-    def finished(child_dir: Path) -> bool:
-        return (child_dir / 'result.json').exists()
-
-    if isinstance(which, list):
-        target_ids = which
-    elif which in ('all', 'any'):
-        target_ids = [d.name for d in agent_root.iterdir() if d.is_dir()]
-    else:
-        target_ids = [str(which)]
-
-    pending = set(target_ids)
-    while pending:
-        for cid in list(pending):
-            cdir = agent_root / cid
-            if finished(cdir):
-                try: results[cid] = _read_json(cdir/ 'result.json')
-                except Exception: results[cid] = {"status": "done"}
-                pending.remove(cid)
-                if which == 'any':
-                    pending.clear()
-                    break
-        if not pending:
-            break
-        if timeout and (time.time() - start) > timeout:
-            break
-        time.sleep(1)
-
-    return json.dumps({"completed": list(results.keys()), "results": results, "pending": list(pending)}, indent=2)
-
-
 def tool_write_result(args: Dict) -> str:
     agent_dir = args.get('agent_dir')
     return_value = args.get('return_value', '')
