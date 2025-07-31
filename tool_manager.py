@@ -57,12 +57,13 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "wait_agents",
-        "description": "Wait for the specified list of children to finish. Pass an empty list to wait for all current children. Optional timeout_sec.",
+        "description": "Wait for the specified list of children to finish. Pass an empty list to wait for all current children. Optional timeout_sec. Supports any_mode to return when any completes.",
         "parameters": {
             "type": "object",
             "properties": {
                 "which": {"type": "array", "items": {}},
-                "timeout_sec": {"type": "integer"}
+                "timeout_sec": {"type": "integer"},
+                "any_mode": {"type": "boolean"}
             },
             "required": ["which"]
         }
@@ -199,7 +200,6 @@ def _split_v(target_pane: str) -> str:
 def _kill_pane(pane_id: str):
     if not pane_id:
         return
-    # Try to kill; ignore errors (pane might already be gone)
     run_bash_script(f"tmux kill-pane -t {pane_id} 2>/dev/null || true")
 
 
@@ -327,6 +327,7 @@ def tool_spawn_agent(args: Dict) -> str:
 def tool_wait_agents(args: Dict) -> str:
     which = args.get('which')
     timeout = int(args.get('timeout_sec', 0))
+    any_mode = bool(args.get('any_mode', False))
 
     tree_id = os.environ.get('EG_TREE_ID')
     if not tree_id:
@@ -337,7 +338,6 @@ def tool_wait_agents(args: Dict) -> str:
     if not tree_id:
         return json.dumps({"error": "No tree context found"})
 
-    # If which is None or not a list, error. If it's an empty list, wait for all current children.
     if not isinstance(which, list):
         return json.dumps({"error": "which must be a list (empty list means all children)"})
 
@@ -353,7 +353,6 @@ def tool_wait_agents(args: Dict) -> str:
     results: Dict[str, Any] = {}
     pending = set(target_ids)
 
-    # If there are no targets at all, short return
     if not pending:
         return json.dumps({"completed": [], "results": {}, "pending": []}, indent=2)
 
@@ -366,6 +365,19 @@ def tool_wait_agents(args: Dict) -> str:
                 except Exception:
                     results[cid] = {"status": "done"}
                 pending.remove(cid)
+                if any_mode:
+                    # Stop early when any completes
+                    pending_list = list(pending)
+                    # Attempt pane cleanup for this child before returning
+                    st = _read_json(cdir / 'state.json') or {}
+                    pane_id = st.get('pane_id', '') if isinstance(st, dict) else ''
+                    if pane_id:
+                        _kill_pane(pane_id)
+                    return json.dumps({
+                        "completed": list(results.keys()),
+                        "results": results,
+                        "pending": pending_list
+                    }, indent=2)
         if not pending:
             break
         if timeout and (time.time() - start) > timeout:
@@ -375,8 +387,8 @@ def tool_wait_agents(args: Dict) -> str:
         name_to_dir = {name: p for name, p in all_children}
         time.sleep(1)
 
-    # Attempt to clean up panes of completed children
-    for cid in list(results.keys()):
+    # Cleanup panes of completed children (all-mode or timeout)
+    for cid, res in list(results.items()):
         cdir = name_to_dir.get(cid)
         if not cdir:
             continue

@@ -29,6 +29,30 @@ def ensure_tree_id(console: Console):
     return tree_id
 
 
+def _record_tmux_pane_if_available(console: Console):
+    """Record TMUX_PANE into this agent's state.json if running as an agent inside tmux."""
+    agent_dir = os.environ.get('EG_AGENT_DIR')
+    pane = os.environ.get('TMUX_PANE', '')
+    if not agent_dir or not pane:
+        return
+    try:
+        state_path = Path(agent_dir) / 'state.json'
+        if state_path.exists():
+            try:
+                with open(state_path, 'r') as f:
+                    st = json.load(f)
+            except Exception:
+                st = {}
+        else:
+            st = {}
+        if st.get('pane_id') != pane:
+            st['pane_id'] = pane
+            with open(state_path, 'w') as f:
+                json.dump(st, f, indent=2)
+    except Exception as e:
+        console.print(f"[yellow]Warning: could not record TMUX_PANE: {e}[/yellow]")
+
+
 def main():
     console = Console()
 
@@ -41,6 +65,9 @@ def main():
         console.print(f"[bold red]Error: {e}[/bold red]")
         console.print("Please provide necessary API environment variables.")
         return
+
+    # Record current pane id for deterministic pane targeting
+    _record_tmux_pane_if_available(console)
 
     def get_prompt_message():
         model_name = client.current_model_key
@@ -95,7 +122,7 @@ def main():
             "[bold]/pushContext <context_or_file.md>[/bold] - Push current chat and start new context.\n"
             "[bold]/popContext <return_value>[/bold] - Pop context from stack and return to previous. For subagents: finalize and return result to parent.\n"
             "[bold]/spawn <file.md?> <text>[/bold] - Spawn child like pushContext.\n"
-            "[bold]/wait <child_id|space-separated list>[/bold] - Wait for specific child agents (all must be listed).\n"
+            "[bold]/wait <child_id|space-separated list>|any|all[/bold] - Wait for specific child agents, any, or all.\n"
             "[bold]/tree[/bold] - List children in current tree.  [bold]/attach <tree_id?> [agent_id?][/bold] - Attach tmux.\n"
             "[bold]/tree use <tree_id>[/bold] - Switch active agent tree for this session.  [bold]/tree list[/bold] - List existing trees.\n"
             "[bold]/o <tree_id>|list[/bold] - Attach to a tree's tmux session (list to show trees).\n",
@@ -259,12 +286,20 @@ def main():
             elif user_input.startswith("/wait"):
                 rest = user_input[len("/wait"):].strip()
                 client.messages.append({"role": "user", "content": user_input})
-                # Build args: require explicit list of ids
-                if not rest:
-                    console.print("[yellow]Usage: /wait <child_id> [child_id2 child_id3 ...][/yellow]")
-                    continue
+                # Interpret keywords any/all
                 parts = rest.split()
-                args_obj = {"which": parts}
+                args_obj = {}
+                if len(parts) == 0:
+                    console.print("[yellow]Usage: /wait <child_id> [child_id2 ...] | any | all[/yellow]")
+                    continue
+                if len(parts) == 1 and parts[0].lower() in ("any", "all"):
+                    mode = parts[0].lower()
+                    if mode == "all":
+                        args_obj = {"which": []}  # interpreted as all current children
+                    else:
+                        args_obj = {"which": [], "any_mode": True}
+                else:
+                    args_obj = {"which": parts}
                 # Try local execution first
                 try:
                     from tool_manager import tool_wait_agents
