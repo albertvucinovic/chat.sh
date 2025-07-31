@@ -241,33 +241,54 @@ def main():
             elif user_input.startswith("/spawn"):
                 # Always handle /spawn locally. Do not fallback to model tool-call on errors.
                 client.messages.append({"role": "user", "content": user_input})
-                match = re.match(r"/spawn\s*(\S+\.md)?\s*(.*)", user_input)
-                if not match:
-                    console.print("[yellow]Usage: /spawn [<file_path.md>] [<additional_text>] [/yellow]")
-                    continue
-                file_path = match.group(1)
-                additional_text = match.group(2).strip()
+                # Robust parsing: consider quoted first arg as potential file; otherwise treat all as text
+                rest = user_input[len("/spawn"):].strip()
+                file_path = None
+                additional_text = ""
+                if rest:
+                    if rest[0] in ('"', "'"):
+                        q = rest[0]
+                        end = rest.find(q, 1)
+                        if end != -1:
+                            candidate = rest[1:end]
+                            tail = rest[end+1:].strip()
+                        else:
+                            candidate = rest[1:]
+                            tail = ""
+                    else:
+                        parts2 = rest.split(None, 1)
+                        candidate = parts2[0]
+                        tail = parts2[1] if len(parts2) > 1 else ""
+                    # Validate candidate as an existing .md path
+                    resolved_fp = None
+                    if candidate.lower().endswith('.md'):
+                        try:
+                            if candidate.startswith('global/'):
+                                script_dir = os.path.dirname(os.path.realpath(__file__))
+                                resolved_fp = os.path.join(script_dir, 'global_commands', candidate[len('global/'):])
+                            else:
+                                resolved_fp = candidate
+                            if os.path.isfile(resolved_fp):
+                                file_path = candidate
+                                additional_text = tail
+                            else:
+                                resolved_fp = None
+                        except Exception:
+                            resolved_fp = None
+                    if resolved_fp is None:
+                        # Treat everything as additional text
+                        file_path = None
+                        additional_text = rest
                 context_parts = []
                 label = None
-                # Validate file_path actually exists; otherwise treat everything as additional_text
-                resolved_fp = None
                 if file_path:
                     try:
-                        if file_path.startswith("global/"):
+                        # At this point, resolved_fp must exist
+                        if file_path.startswith('global/'):
                             script_dir = os.path.dirname(os.path.realpath(__file__))
                             resolved_fp = os.path.join(script_dir, 'global_commands', file_path[len('global/'):])
                         else:
                             resolved_fp = file_path
-                        if not (resolved_fp and os.path.isfile(resolved_fp)):
-                            additional_text = (file_path + ' ' + additional_text).strip()
-                            file_path = None
-                            resolved_fp = None
-                    except Exception:
-                        additional_text = (file_path + ' ' + additional_text).strip()
-                        file_path = None
-                        resolved_fp = None
-                if resolved_fp:
-                    try:
                         with open(resolved_fp, 'r', encoding='utf-8') as f:
                             context_parts.append(f.read())
                         label = os.path.splitext(os.path.basename(file_path))[0]
@@ -299,33 +320,54 @@ def main():
             elif user_input.startswith("/spawn_auto"):
                 # Always handle /spawn_auto locally. Do not fallback to model tool-call on errors.
                 client.messages.append({"role": "user", "content": user_input})
-                match = re.match(r"/spawn_auto\s*(\S+\.md)?\s*(.*)", user_input)
-                if not match:
-                    console.print("[yellow]Usage: /spawn_auto [<file_path.md>] [<additional_text>] [/yellow]")
-                    continue
-                file_path = match.group(1)
-                additional_text = match.group(2).strip()
+                # Robust parsing: consider quoted first arg as potential file; otherwise treat all as text
+                rest = user_input[len("/spawn_auto"):].strip()
+                file_path = None
+                additional_text = ""
+                if rest:
+                    if rest[0] in ('"', "'"):
+                        q = rest[0]
+                        end = rest.find(q, 1)
+                        if end != -1:
+                            candidate = rest[1:end]
+                            tail = rest[end+1:].strip()
+                        else:
+                            candidate = rest[1:]
+                            tail = ""
+                    else:
+                        parts2 = rest.split(None, 1)
+                        candidate = parts2[0]
+                        tail = parts2[1] if len(parts2) > 1 else ""
+                    # Validate candidate as an existing .md path
+                    resolved_fp = None
+                    if candidate.lower().endswith('.md'):
+                        try:
+                            if candidate.startswith('global/'):
+                                script_dir = os.path.dirname(os.path.realpath(__file__))
+                                resolved_fp = os.path.join(script_dir, 'global_commands', candidate[len('global/'):])
+                            else:
+                                resolved_fp = candidate
+                            if os.path.isfile(resolved_fp):
+                                file_path = candidate
+                                additional_text = tail
+                            else:
+                                resolved_fp = None
+                        except Exception:
+                            resolved_fp = None
+                    if resolved_fp is None:
+                        # Treat everything as additional text
+                        file_path = None
+                        additional_text = rest
                 context_parts = []
                 label = None
-                # Validate file_path actually exists; otherwise treat everything as additional_text
-                resolved_fp = None
                 if file_path:
                     try:
-                        if file_path.startswith("global/"):
+                        # At this point, resolved_fp must exist
+                        if file_path.startswith('global/'):
                             script_dir = os.path.dirname(os.path.realpath(__file__))
                             resolved_fp = os.path.join(script_dir, 'global_commands', file_path[len('global/'):])
                         else:
                             resolved_fp = file_path
-                        if not (resolved_fp and os.path.isfile(resolved_fp)):
-                            additional_text = (file_path + ' ' + additional_text).strip()
-                            file_path = None
-                            resolved_fp = None
-                    except Exception:
-                        additional_text = (file_path + ' ' + additional_text).strip()
-                        file_path = None
-                        resolved_fp = None
-                if resolved_fp:
-                    try:
                         with open(resolved_fp, 'r', encoding='utf-8') as f:
                             context_parts.append(f.read())
                         label = os.path.splitext(os.path.basename(file_path))[0]
