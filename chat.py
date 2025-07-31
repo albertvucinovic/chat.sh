@@ -119,7 +119,7 @@ def main():
             with open(init_ctx_file, 'r', encoding='utf-8') as f:
                 init_text = f.read().strip()
             if init_text:
-                instruction = "[SYSTEM NOTE] You are a subagent. When you finish your task, you MUST call the /popContext command with a concise return value (e.g., a path to your output or a short summary). Example: /popContext ./output.md"
+                instruction = "[SYSTEM NOTE] You are a subagent. When you finish this task, you MUST call the /popContext command with your result. If the result is longer, you can create a file to store it. Use the popContext tool. Example: /popContext My result is in ./output.md"
                 # Ensure the model sees the instruction inline in the prompt
                 client.messages.append({"role": "user", "content": f"{init_text}\n\n{instruction}"})
                 # Display subagent info and initial context visibly
