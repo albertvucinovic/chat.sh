@@ -16,9 +16,6 @@ import tool_manager
 
 
 def main():
-    """
-    Main function to run the chat application.
-    """
     console = Console()
     try:
         client = ChatClient()
@@ -27,17 +24,13 @@ def main():
         console.print("Please provide necessary API environment variables.")
         return
 
-    # --- Dynamic Prompt Setup ---
     def get_prompt_message():
-        """Returns the prompt string based on border state."""
         model_name = client.current_model_key
         return f"[You & {model_name}]: " if client.borders_enabled else f"You & {model_name}: "
 
     def get_continuation_message(width, line_number, wrap_count):
-        """Returns the continuation prompt string based on border state."""
         return "[...] " if client.borders_enabled else "... "
 
-    # --- Prompt Session Setup ---
     session = PromptSession(
         message=get_prompt_message,
         completer=PtkCompleter(client),
@@ -46,7 +39,6 @@ def main():
         prompt_continuation=get_continuation_message,
     )
 
-    # --- Key Bindings for prompt-toolkit ---
     kb = KeyBindings()
 
     @kb.add("c-d")
@@ -59,16 +51,10 @@ def main():
 
     @kb.add("c-e")
     def _(event):
-        """Clears the current input buffer."""
         event.current_buffer.reset()
 
     @kb.add('right')
     def _(event):
-        """
-        Accepts the current completion.
-        - If completion menu is visible, accepts the selected completion.
-        - Otherwise, accepts the auto-suggestion (gray text).
-        """
         if event.current_buffer.complete_state:
             completion = event.current_buffer.complete_state.current_completion
             if completion:
@@ -80,7 +66,6 @@ def main():
 
     @kb.add("c-b")
     def _(event):
-        """Toggles UI borders and prints a status message above the prompt."""
         client.toggle_borders()
 
     session.key_bindings = kb
@@ -99,26 +84,36 @@ def main():
         )
     )
 
+    # Auto-inject initial context for child agents
+    try:
+        agent_dir = os.environ.get('EG_AGENT_DIR')
+        init_ctx_file = os.environ.get('EG_INIT_CONTEXT_FILE')
+        consumed_marker = os.path.join(agent_dir, '.context_consumed') if agent_dir else None
+        if init_ctx_file and os.path.isfile(init_ctx_file) and (not consumed_marker or not os.path.exists(consumed_marker)):
+            with open(init_ctx_file, 'r', encoding='utf-8') as f:
+                init_text = f.read().strip()
+            if init_text:
+                client.messages.append({"role": "user", "content": init_text})
+                client.send_message("")
+                if consumed_marker:
+                    with open(consumed_marker, 'w') as cf:
+                        cf.write('1')
+    except Exception:
+        pass
+
     def shutdown():
-        """
-        Saves the chat and exits cleanly.
-        Note: Context stack management is handled within ChatClient methods
-        (push_context/pop_context) which save specific sub-contexts.
-        This save_chat is for the root level or final state.
-        """
         console.print("\n\n[bold yellow]Saving chat and exiting...[/bold yellow]")
         saved_path = client.save_chat()
         console.print(f"[green]Chat saved to:[/green] {saved_path}")
         sys.exit(0)
 
-    # --- Main Application Loop ---
     while True:
         try:
             client.in_single_turn_auto_execute_calls = False
             user_input = session.prompt().strip()
 
             if not user_input:
-                client.send_message(user_input)  # Send empty messages also
+                client.send_message(user_input)
                 continue
 
             elif user_input.startswith("b "):
@@ -128,8 +123,7 @@ def main():
                 if script_to_run:
                     output = run_bash_script(script_to_run)
                     output_renderable = Text(output)
-                    console.print(Panel(
-                        output_renderable, title="[bold green]Local Command Output[/bold green]", border_style="green", box=client.boxStyle))
+                    console.print(Panel(output_renderable, title="[bold green]Local Command Output[/bold green]", border_style="green", box=client.boxStyle))
                     context_message = (
                         "User executed a local command.\n"
                         f"Command:\n```bash\n{script_to_run}\n```\n\n"
@@ -138,15 +132,6 @@ def main():
                     client.send_context_only(context_message)
                 else:
                     console.print("[yellow]Empty bash command, skipping.[/yellow]")
-                continue
-
-            elif user_input.startswith("o "):
-                client.messages.append({"role": "user", "content": user_input})
-                chat_name = user_input[2:].strip()
-                if chat_name:
-                    client.load_chat(chat_name)
-                else:
-                    console.print("[yellow]No chat file specified.[/yellow]")
                 continue
 
             elif user_input.startswith("/model"):
@@ -163,8 +148,7 @@ def main():
                     additional_text = match.group(2).strip()
                     if file_path or additional_text:
                         result = client.push_context(file_path, additional_text)
-                        console.print(Panel(
-                            result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan", box=client.boxStyle))
+                        console.print(Panel(result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan", box=client.boxStyle))
                         if not result.startswith("Error:"):
                             client.send_message("")
                     else:
@@ -178,8 +162,7 @@ def main():
                 return_value = user_input[len("/popContext"):].strip()
                 if return_value:
                     result = client.pop_context(return_value)
-                    console.print(Panel(
-                        result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan", box=client.boxStyle))
+                    console.print(Panel(result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan", box=client.boxStyle))
                 else:
                     console.print("[yellow]Usage: /popContext <return_value>[/yellow]")
                 continue
@@ -221,7 +204,6 @@ def main():
                 if not label:
                     label = (additional_text.split()[:1] or ["child"])[0]
 
-                # Try direct local spawn first
                 try:
                     result_json = tool_manager.tool_spawn_agent({"context_text": context_text, "label": label})
                     console.print(Panel(Text(result_json), title="[bold green]Spawned Agent[/bold green]", border_style="green", box=client.boxStyle))
@@ -252,7 +234,6 @@ def main():
                 continue
 
             elif user_input.startswith("/tree"):
-                # Default to current agent's children; no tree_id required
                 tree_id = os.environ.get('EG_TREE_ID') or (open('.egg/agents/.current_tree').read().strip() if os.path.exists('.egg/agents/.current_tree') else 'default')
                 parent_id = os.environ.get('EG_AGENT_ID', 'root')
                 children_dir = os.path.join('.egg/agents', tree_id, parent_id, 'children')
@@ -266,7 +247,6 @@ def main():
             elif user_input.startswith("/attach"):
                 parts = user_input.split()
                 if len(parts) < 2:
-                    # default to current tree if available
                     tree_id = os.environ.get('EG_TREE_ID') or (open('.egg/agents/.current_tree').read().strip() if os.path.exists('.egg/agents/.current_tree') else '')
                     if not tree_id:
                         console.print("[yellow]Usage: /attach <tree_id> [agent_id][/yellow]")
@@ -283,6 +263,7 @@ def main():
             client.send_message(user_input)
 
         except KeyboardInterrupt:
+            console.print("[bold yellow]\nInterrupted.[/bold yellow]")
             shutdown()
         except EOFError:
             shutdown()
