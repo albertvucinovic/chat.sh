@@ -187,6 +187,13 @@ def _write_child_pane_id(tree_id: str, parent_id: str, child_id: str, pane_id: s
     _write_json(p, st)
 
 
+def _pane_exists(pane_id: str) -> bool:
+    if not pane_id:
+        return False
+    out = _tmux_raw(f"tmux list-panes -a -F '#{{pane_id}}' | grep -Fx {pane_id} || true")
+    return pane_id in (out.split() if out else [])
+
+
 def _split_h(target_pane: str) -> str:
     run_bash_script(f"tmux split-window -h -t {target_pane}")
     return _tmux_raw("tmux display-message -p '#{pane_id}'")
@@ -217,12 +224,11 @@ def _spawn_into_parent_layer(session: str, tree_id: str, parent_id: str, run_scr
     if not parent_pane:
         return ""
 
-    # Check if a right column already exists for this parent
+    # Check if a right column already exists for this parent and is alive
     right_col = _read_parent_right_column_pane(tree_id, parent_id)
-    if not right_col:
-        # First child in this layer: vertical split to create right column
+    if not right_col or not _pane_exists(right_col):
+        # First child in this layer OR previous right column was killed: create new right column
         right_col = _split_h(parent_pane)
-        # Persist right column pane id in parent state
         _write_parent_right_column_pane(tree_id, parent_id, right_col)
         target_for_child = right_col
     else:
@@ -366,9 +372,7 @@ def tool_wait_agents(args: Dict) -> str:
                     results[cid] = {"status": "done"}
                 pending.remove(cid)
                 if any_mode:
-                    # Stop early when any completes
                     pending_list = list(pending)
-                    # Attempt pane cleanup for this child before returning
                     st = _read_json(cdir / 'state.json') or {}
                     pane_id = st.get('pane_id', '') if isinstance(st, dict) else ''
                     if pane_id:
@@ -382,12 +386,10 @@ def tool_wait_agents(args: Dict) -> str:
             break
         if timeout and (time.time() - start) > timeout:
             break
-        # Refresh mapping in case new children appear
         all_children = _list_all_children_dirs(tree_id)
         name_to_dir = {name: p for name, p in all_children}
         time.sleep(1)
 
-    # Cleanup panes of completed children (all-mode or timeout)
     for cid, res in list(results.items()):
         cdir = name_to_dir.get(cid)
         if not cdir:
