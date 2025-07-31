@@ -150,6 +150,36 @@ class ChatClient:
         return f"Entered new context from: {file_path if file_path else 'additional text'}"
 
     def pop_context(self, return_value: str) -> str:
+        # If running within an agent directory, write result.json for FS-based tree
+        agent_dir = os.environ.get('EG_AGENT_DIR')
+        if agent_dir:
+            try:
+                result_path = Path(agent_dir) / 'result.json'
+                res = {
+                    "status": "done",
+                    "return_value": return_value,
+                    "summary": self.summary or "",
+                    "finished_at": int(datetime.datetime.now().timestamp())
+                }
+                with open(result_path, 'w') as f:
+                    json.dump(res, f, indent=2)
+                # update state
+                st_path = Path(agent_dir) / 'state.json'
+                try:
+                    with open(st_path, 'r') as f:
+                        st = json.load(f)
+                except Exception:
+                    st = {}
+                st['status'] = 'done'
+                with open(st_path, 'w') as f:
+                    json.dump(st, f, indent=2)
+                # notify
+                notify_dir = Path(agent_dir) / 'notify'
+                notify_dir.mkdir(exist_ok=True, parents=True)
+                (notify_dir / 'done').write_text('1')
+            except Exception as e:
+                self.console.print(f"[bold red]Error writing agent result: {e}[/bold red]")
+        
         current_sub_context_file = self._save_chat_messages_to_file(self.messages, "popped_context", return_value)
         if not self.context_stack:
             self._clear_display()

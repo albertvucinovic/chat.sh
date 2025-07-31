@@ -1,4 +1,9 @@
 {
+   "Horizon Alpha": {
+       "provider": "openrouter",
+       "model_name": "openrouter/horizon-alpha",
+       "max_tokens": 250000
+   },
    "Qwen3 30B Thinking 2507": {
         "provider": "local",
         "model_name": "../vllm/Models/Qwen/Qwen3-30B-A3B-Thinking-2507-UD-Q6_K_XL.gguf",
