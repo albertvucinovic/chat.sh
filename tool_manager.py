@@ -156,14 +156,18 @@ def _spawn_in_right_column(session: str, window: str, cmd: str, make_right_if_mi
             run_bash_script(f"tmux select-window -t {session}:{window} && tmux split-window -h -t {session}:{window}")
     # Determine rightmost pane index and select it
     right_idx = _get_right_pane_index(session, window)
+    # Always select the right pane explicitly
     run_bash_script(f"tmux select-window -t {session}:{window} && tmux select-pane -t {session}:{window}.{right_idx}")
+
     if first_on_right:
-        # Run directly in the right pane
+        # Run directly in the right pane (target exact pane)
         run_bash_script(f"tmux send-keys -t {session}:{window}.{right_idx} '{cmd}' C-m")
     else:
         # Split the right pane vertically and run in the new (active) bottom pane
-        run_bash_script(f"tmux split-window -v -t {session}:{window}.{right_idx} && tmux send-keys -t {session}:{window} '{cmd}' C-m")
-    # Keep existing layout; do not force tiled layout to preserve left-right with stacked right panes
+        # Target the split at the right pane index to keep stacking on the right
+        run_bash_script(f"tmux split-window -v -t {session}:{window}.{right_idx}")
+        # After split, the new pane is active; send command to the active pane in this window
+        run_bash_script(f"tmux send-keys -t {session}:{window} '{cmd}' C-m")
 
 
 def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, tree_id: str, parent_id: str):
