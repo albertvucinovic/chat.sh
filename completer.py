@@ -16,7 +16,7 @@ class PtkCompleter(Completer):
     def __init__(self, client: "ChatClient"):
         self.client = client
         self.all_commands = [
-            "/model", "/pushContext", "/popContext", "/toggleYesToolFlag", "/toggleThinkingDisplay", "o", "b", "/replace_lines", "/spawn", "/wait"
+            "/model", "/pushContext", "/popContext", "/toggleYesToolFlag", "/toggleThinkingDisplay", "o", "b", "/replace_lines", "/spawn", "/wait", "/tree", "/attach"
         ]
 
     def _get_filesystem_suggestions(self, prefix: str) -> List[str]:
@@ -147,9 +147,112 @@ class PtkCompleter(Completer):
                     yield Completion(w, start_position=-len(current_fragment))
             return
 
-        # Handler for: /popContext <return_value>
+        # Spawn mirrors /pushContext suggestions for file path and words
+        elif text.startswith("/spawn"):
+            input_after_command = text[len("/spawn"):].lstrip()
+            current_fragment = document.get_word_before_cursor(WORD=True)
+            file_followed_by_space_match = re.match(r"^\S+\.md\s.*", input_after_command)
+            is_in_additional_text_mode = False
+            if file_followed_by_space_match:
+                is_in_additional_text_mode = True
+            elif ' ' in input_after_command and not re.match(r"^\S+\.md", input_after_command.split(' ')[0]):
+                is_in_additional_text_mode = True
+            elif not current_fragment and input_after_command.strip() and not file_followed_by_space_match:
+                pass
+
+            if is_in_additional_text_mode or (not current_fragment and input_after_command.strip() and not file_followed_by_space_match):
+                if current_fragment or input_after_command.endswith(' '):
+                    recent_words = self.client.get_recent_words_for_completion(limit=200)
+                    aimd_words = self.client.get_aimd_words_for_completion()
+                    all_words = aimd_words + recent_words
+                    seen = set()
+                    matches = [w for w in all_words if w.lower().startswith(current_fragment.lower()) and not (w.lower() in seen or seen.add(w.lower()))]
+                    for w in matches:
+                        yield Completion(w, start_position=-len(current_fragment))
+                return
+
+            if 'global/'.startswith(current_fragment):
+                yield Completion('global/', start_position=-len(current_fragment))
+
+            if current_fragment.startswith('global/'):
+                path_part = current_fragment[len('global/'):]
+                script_dir = os.path.dirname(os.path.realpath(__file__))
+                global_dir = os.path.join(script_dir, 'global_commands')
+                search_path = os.path.join(global_dir, path_part)
+                suggestions = self._get_filesystem_suggestions(search_path)
+                for s in suggestions:
+                    rel_path = 'global/' + os.path.relpath(s, global_dir).replace('\\', '/')
+                    yield Completion(rel_path, start_position=-len(current_fragment))
+                if suggestions: return
+            else:
+                suggestions = self._get_filesystem_suggestions(current_fragment)
+                for s in suggestions:
+                    yield Completion(s, start_position=-len(current_fragment))
+                if suggestions: return
+
+            if current_fragment or input_after_command.endswith(' '):
+                recent_words = self.client.get_recent_words_for_completion(limit=200)
+                aimd_words = self.client.get_aimd_words_for_completion()
+                all_words = aimd_words + recent_words
+                seen = set()
+                matches = [w for w in all_words if w.lower().startswith(current_fragment.lower()) and not (w.lower() in seen or seen.add(w.lower()))]
+                for w in matches:
+                    yield Completion(w, start_position=-len(current_fragment))
+            return
+
         elif text.startswith("/popContext "):
             return
+
+        elif text.startswith("/tree "):
+            # Suggest existing tree ids from filesystem
+            try:
+                base = Path('.egg/agents')
+                if base.is_dir():
+                    prefix = text[len('/tree '):]
+                    for d in base.iterdir():
+                        if d.is_dir() and d.name.startswith(prefix):
+                            yield Completion(d.name, start_position=-len(prefix))
+            except Exception:
+                pass
+            return
+
+        elif text.startswith("/attach"):
+            parts = text.split()
+            if len(parts) == 1:
+                # Suggest tree ids
+                try:
+                    base = Path('.egg/agents')
+                    if base.is_dir():
+                        for d in base.iterdir():
+                            if d.is_dir():
+                                yield Completion(d.name, start_position=0)
+                except Exception:
+                    pass
+                return
+            elif len(parts) == 2 and not text.endswith(' '):
+                # Complete tree id
+                prefix = parts[1]
+                try:
+                    base = Path('.egg/agents')
+                    for d in base.iterdir():
+                        if d.is_dir() and d.name.startswith(prefix):
+                            yield Completion(d.name, start_position=-len(prefix))
+                except Exception:
+                    pass
+                return
+            else:
+                # Suggest child ids under the given tree
+                tree_id = parts[1] if len(parts) > 1 else 'default'
+                prefix = parts[2] if len(parts) > 2 else ''
+                try:
+                    child_root = Path('.egg/agents')/tree_id/'root'/'children'
+                    if child_root.is_dir():
+                        for d in child_root.iterdir():
+                            if d.is_dir() and d.name.startswith(prefix):
+                                yield Completion(d.name, start_position=-len(prefix))
+                except Exception:
+                    pass
+                return
 
         # Handler for command names themselves
         elif len(words) == 1 and not text.endswith(' '):
