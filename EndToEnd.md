@@ -220,4 +220,84 @@ This document outlines the manual end-to-end tests required to verify the comple
     5.  Ask another complex question.
 *   **Expected Outcome:**
     *   After the first toggle, a message "Thinking display is now OFF" is printed. During generation, only the "Assistant is thinking..." panel is visible until the final response is rendered.
-    *   After the second toggle, a message "Thinking display is now ON" is printed. During generation, a "Reasoning" panel should appear (if the model provides that data) and stream content live, alongside the main assistant response panel.
+
+---
+
+## 7. Agent Trees, Subagents, and /wait
+
+### Test 7.1: Fresh session creates a new tree and isolates /wait
+
+- Steps:
+  1. Run `./chat.sh` in a new terminal.
+  2. Observe the "Started new agent tree: <TREE_ID>" panel.
+  3. Run `/tree list`.
+  4. Run `/wait any`.
+- Expected Outcome:
+  - The tree panel shows a fresh `<TREE_ID>`.
+  - `/tree list` marks this `<TREE_ID>` with an asterisk.
+  - `/wait any` returns immediately with `completed=[]` and `pending=[]` (no hang).
+
+### Test 7.2: Spawn subagent, finish with `/popContext`, parent `/wait` gets results
+
+- Steps:
+  1. Prepare a file `global_commands/sample.md` with any content.
+  2. In parent: `/spawn global/sample.md Do the task`
+  3. In child window: verify Subagent Context, Initial Context, and How to Finish panels.
+  4. In child: `/popContext ./output.md`
+  5. In parent: `/wait any`
+- Expected Outcome:
+  - Child window exits after popContext.
+  - Parent displays a "Wait Agents" panel showing JSON with the child in `completed` and `results[child_id].return_value == ./output.md`. A "Wait Results" panel summarizes the result.
+
+### Test 7.3: Per-run isolation with new tree
+
+- Steps:
+  1. Open a new terminal and run `./chat.sh` again.
+  2. Observe a new "Started new agent tree: <NEW_TREE_ID>".
+  3. `/tree list`
+  4. `/wait any`
+- Expected Outcome:
+  - A brand-new tree id is created and marked as current.
+  - `/wait any` returns empty results (does not consider previous session’s children).
+
+### Test 7.4: Continue an existing tree via `/tree use`
+
+- Steps:
+  1. In the new session: `/tree list` and identify an older `<TREE_ID>`.
+  2. `/tree use <TREE_ID>`
+  3. `/wait all`
+- Expected Outcome:
+  - Panel confirms "Switched to tree: <TREE_ID>".
+  - `/wait all` behaves according to children in that tree; completed results appear if any are done.
+
+### Test 7.5: Wait for explicit child ids
+
+- Steps:
+  1. `/spawn global/sample.md quick-task`
+  2. Note the child_id in the "Spawned Agent" panel (e.g., `sample-001`).
+  3. `/wait sample-001`
+- Expected Outcome:
+  - `/wait` waits for exactly that child and returns its result when finished.
+
+### Test 7.6: `/wait all` with no children returns immediately
+
+- Steps:
+  1. In a fresh session: `/wait all`
+- Expected Outcome:
+  - Immediate return with `completed=[]` and `pending=[]`; no hang.
+
+## 8. tmux Attach
+
+### Test 8.1: Attach to a tree’s tmux session
+
+- Steps:
+  1. `/tree list`, note current `<TREE_ID>`.
+  2. `/attach <TREE_ID>`
+- Expected Outcome:
+  - tmux attaches; windows include spawned children labeled by their `child_id`.
+
+Notes:
+- Each fresh run of `./chat.sh` now creates a new tree unless `EG_TREE_ID` is pre-set or you switch via `/tree use`.
+- `/wait` executes locally and shows both raw JSON and a summarized "Wait Results" panel.
+- Subagents exit on `/popContext` and write `result.json` to their agent dir under the active tree.
+- Trees live under `.egg/agents/<tree_id>/...`, with the current tree id stored in `.egg/agents/.current_tree` and exported as `EG_TREE_ID`.

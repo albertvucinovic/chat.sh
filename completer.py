@@ -76,29 +76,18 @@ class PtkCompleter(Completer):
             input_after_command = text[len("/pushContext"):].lstrip()
             current_fragment = document.get_word_before_cursor(WORD=True)
             
-            # Regex to check if a file path (ending in .md) has been typed and is followed by a space
-            # This helps determine if we are now in the 'additional_text' part.
             file_followed_by_space_match = re.match(r"^\S+\.md\s.*", input_after_command)
             
-            # If an .md file path was recognized and followed by a space, we are in the additional_text part.
-            # OR, if there's no fragment currently being typed, but there's content after the command
-            # AND it doesn't look like a file path being typed (e.g., "/pushContext some text"),
-            # then also treat it as additional text.
             is_in_additional_text_mode = False
-            if file_followed_by_space_match: # Case: /pushContext file.md <cursor_here_or_after>
+            if file_followed_by_space_match:
                 is_in_additional_text_mode = True
             elif ' ' in input_after_command and not re.match(r"^\S+\.md", input_after_command.split(' ')[0]):
-                # Case: /pushContext some other text (no .md file, but multiple words)
                 is_in_additional_text_mode = True
-            elif not current_fragment and input_after_command.strip() and not file_followed_by_space_match: # Case: /pushContext <cursor after command>
-                # If cursor is after command, and there's content but no fragment, and it's not a file followed by space
-                # This means it's the beginning of additional text or a file not yet typed.
-                # We will prioritize file suggestions first below.
-                pass # Let it fall through to file/general word suggestions
+            elif not current_fragment and input_after_command.strip() and not file_followed_by_space_match:
+                pass 
             
             if is_in_additional_text_mode or (not current_fragment and input_after_command.strip() and not file_followed_by_space_match):
-                # Provide general word completion (recent words, AI.md words)
-                if current_fragment or input_after_command.endswith(' '): # Only suggest if typing something or just typed a space
+                if current_fragment or input_after_command.endswith(' '):
                     recent_words = self.client.get_recent_words_for_completion(limit=200)
                     aimd_words = self.client.get_aimd_words_for_completion()
                     all_words = aimd_words + recent_words
@@ -108,11 +97,6 @@ class PtkCompleter(Completer):
                         yield Completion(w, start_position=-len(current_fragment))
                 return
             
-            # If not in additional text mode, it means we are potentially typing the file path
-            # or the very first word of the additional text without a preceding .md file.
-            # Prioritize file path suggestions for the current fragment.
-            
-            # Handle 'global/' prefix specifically
             if 'global/'.startswith(current_fragment):
                 yield Completion('global/', start_position=-len(current_fragment))
 
@@ -126,17 +110,13 @@ class PtkCompleter(Completer):
                 for s in suggestions:
                     rel_path = 'global/' + os.path.relpath(s, global_dir).replace('\\', '/')
                     yield Completion(rel_path, start_position=-len(current_fragment))
-                if suggestions: return # If global file suggestions are found, stop here
+                if suggestions: return 
             else:
-                # Try local file suggestions
                 suggestions = self._get_filesystem_suggestions(current_fragment)
                 for s in suggestions:
                     yield Completion(s, start_position=-len(current_fragment))
-                if suggestions: return # If local file suggestions are found, stop here
+                if suggestions: return 
             
-            # If no file suggestions were found (or applicable for the current fragment),
-            # then fall back to general word completion. This covers cases where the user
-            # starts typing additional text without an .md file, or just hits space after /pushContext
             if current_fragment or input_after_command.endswith(' '):
                 recent_words = self.client.get_recent_words_for_completion(limit=200)
                 aimd_words = self.client.get_aimd_words_for_completion()
@@ -203,8 +183,19 @@ class PtkCompleter(Completer):
         elif text.startswith("/popContext "):
             return
 
+        elif text.startswith("/tree use "):
+            prefix = text[len('/tree use '):]
+            try:
+                base = Path('.egg/agents')
+                if base.is_dir():
+                    for d in base.iterdir():
+                        if d.is_dir() and d.name != '.current_tree' and d.name.startswith(prefix):
+                            yield Completion(d.name, start_position=-len(prefix))
+            except Exception:
+                pass
+            return
+
         elif text.startswith("/tree "):
-            # Suggest existing tree ids from filesystem
             try:
                 base = Path('.egg/agents')
                 if base.is_dir():
@@ -219,7 +210,6 @@ class PtkCompleter(Completer):
         elif text.startswith("/attach"):
             parts = text.split()
             if len(parts) == 1:
-                # Suggest tree ids
                 try:
                     base = Path('.egg/agents')
                     if base.is_dir():
@@ -230,7 +220,6 @@ class PtkCompleter(Completer):
                     pass
                 return
             elif len(parts) == 2 and not text.endswith(' '):
-                # Complete tree id
                 prefix = parts[1]
                 try:
                     base = Path('.egg/agents')
@@ -241,7 +230,6 @@ class PtkCompleter(Completer):
                     pass
                 return
             else:
-                # Suggest child ids under the given tree; default parent root
                 tree_id = parts[1] if len(parts) > 1 else 'default'
                 prefix = parts[2] if len(parts) > 2 else ''
                 try:
@@ -254,7 +242,6 @@ class PtkCompleter(Completer):
                     pass
                 return
 
-        # Handler for command names themselves
         elif len(words) == 1 and not text.endswith(' '):
             prefix = words[0]
             for cmd in self.all_commands:
@@ -262,7 +249,6 @@ class PtkCompleter(Completer):
                     yield Completion(cmd, start_position=-len(prefix))
             return
 
-        # --- General Fallback Logic for Filesystem Paths ---
         else:
             parts = text.split()
             if not parts or text.endswith(' '):
@@ -279,7 +265,6 @@ class PtkCompleter(Completer):
             if suggestions:
                 return
 
-        # --- Word completion from history for freeform chat ---
         if not text.strip().startswith(('/', 'o ', 'b ', '/model ', '/pushContext ', '/popContext ')):
             line = document.text_before_cursor
             m = re.search(r'(\w{3,})$', line)
@@ -288,7 +273,6 @@ class PtkCompleter(Completer):
                 recent_words = self.client.get_recent_words_for_completion(limit=200)
                 aimd_words = self.client.get_aimd_words_for_completion()
 
-                # Combine words, with AI.md words taking precedence, then recent words.
                 all_words = aimd_words + recent_words
 
                 seen = set()

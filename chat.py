@@ -2,6 +2,8 @@ import os
 import re
 import json
 import sys
+import time
+from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -14,8 +16,25 @@ from completer import PtkCompleter
 from executors import run_bash_script
 
 
+def ensure_tree_id(console: Console):
+    """Ensure this process has a fresh tree id unless EG_TREE_ID is preset."""
+    if os.environ.get('EG_TREE_ID'):
+        return os.environ['EG_TREE_ID']
+    tree_id = str(int(time.time()))
+    base = Path('.egg/agents')
+    base.mkdir(parents=True, exist_ok=True)
+    (base / '.current_tree').write_text(tree_id)
+    os.environ['EG_TREE_ID'] = tree_id
+    console.print(Panel(f"Started new agent tree: {tree_id}", title="[bold]Agent Tree[/bold]", border_style="magenta"))
+    return tree_id
+
+
 def main():
     console = Console()
+
+    # Ensure per-run new tree unless explicitly provided
+    ensure_tree_id(console)
+
     try:
         client = ChatClient()
     except ValueError as e:
@@ -77,7 +96,8 @@ def main():
             "[bold]/popContext <return_value>[/bold] - Pop context from stack and return to previous. For subagents: finalize and return result to parent.\n"
             "[bold]/spawn <file.md?> <text>[/bold] - Spawn child like pushContext.\n"
             "[bold]/wait <child_id|all|any or space-separated list>[/bold] - Wait for child agents.\n"
-            "[bold]/tree[/bold] - List children of current agent.  [bold]/attach <tree_id?> [agent_id?][/bold] - Attach tmux.\n",
+            "[bold]/tree[/bold] - List children of current agent.  [bold]/attach <tree_id?> [agent_id?][/bold] - Attach tmux.\n"
+            "[bold]/tree use <tree_id>[/bold] - Switch active agent tree for this session.  [bold]/tree list[/bold] - List existing trees.\n",
             title="[bold]Welcome[/bold]",
             border_style=client.get_border_style("magenta")
         )
@@ -263,6 +283,26 @@ def main():
                     client.send_message(tool_call_json)
                 continue
 
+            elif user_input.startswith("/tree "):
+                parts = user_input.split()
+                if len(parts) >= 2 and parts[1] == 'list':
+                    base = Path('.egg/agents')
+                    trees = [d.name for d in base.iterdir() if d.is_dir() and d.name != '.current_tree'] if base.exists() else []
+                    current = os.environ.get('EG_TREE_ID', (base / '.current_tree').read_text().strip() if (base / '.current_tree').exists() else '')
+                    tree_list = "\n".join([("* " if t == current else "  ") + t for t in sorted(trees)]) or "<no trees>"
+                    console.print(Panel(Text(tree_list), title="[bold cyan]Agent Trees[/bold cyan]", border_style="cyan", box=client.boxStyle))
+                    continue
+                if len(parts) >= 3 and parts[1] == 'use':
+                    new_id = parts[2]
+                    base = Path('.egg/agents')
+                    if not (base / new_id).exists():
+                        console.print(f"[red]Tree '{new_id}' does not exist.[/red]")
+                        continue
+                    (base / '.current_tree').write_text(new_id)
+                    os.environ['EG_TREE_ID'] = new_id
+                    console.print(Panel(f"Switched to tree: {new_id}", title="[bold]Agent Tree[/bold]", border_style="magenta", box=client.boxStyle))
+                    continue
+
             elif user_input.startswith("/tree"):
                 tree_id = os.environ.get('EG_TREE_ID') or (open('.egg/agents/.current_tree').read().strip() if os.path.exists('.egg/agents/.current_tree') else 'default')
                 parent_id = os.environ.get('EG_AGENT_ID', 'root')
@@ -277,7 +317,8 @@ def main():
             elif user_input.startswith("/attach"):
                 parts = user_input.split()
                 if len(parts) < 2:
-                    tree_id = os.environ.get('EG_TREE_ID') or (open('.egg/agents/.current_tree').read().strip() if os.path.exists('.egg/agents/.current_tree') else '')
+                    base = Path('.egg/agents')
+                    tree_id = os.environ.get('EG_TREE_ID') or ((base / '.current_tree').read_text().strip() if (base / '.current_tree').exists() else '')
                     if not tree_id:
                         console.print("[yellow]Usage: /attach <tree_id> [agent_id][/yellow]")
                         continue
