@@ -90,8 +90,9 @@ def main():
             "[bold]Ctrl+D[/bold] to submit. [bold]Ctrl+B[/bold] for borders. [bold]Ctrl+E[/bold] to clear. [bold]Ctrl+C[/bold] to exit.\n"
             "[bold]/pushContext <context_or_file.md>[/bold] - Push current chat and start new context.\n"
             "[bold]/popContext <return_value>[/bold] - Pop context from stack and return to previous.\n"
-            "[bold]/spawn {json}[/bold] - Spawn child agents in tmux.\n"
-            "[bold]/wait {json}[/bold] - Wait for child agents (all/any/ids).\n",
+            "[bold]/spawn <file.md?> <text> [--tree X --parent Y --label Z --count N][/bold] - Spawn child like pushContext.\n"
+            "[bold]/wait {json}[/bold] - Wait for child agents (all/any/ids).\n"
+            "[bold]/tree <tree_id>[/bold] - List agent tree.  [bold]/attach <tree_id> [agent_id][/bold] - Attach tmux.\n",
             title="[bold]Welcome[/bold]",
             border_style=client.get_border_style("magenta")
         )
@@ -109,6 +110,22 @@ def main():
         saved_path = client.save_chat()
         console.print(f"[green]Chat saved to:[/green] {saved_path}")
         sys.exit(0)
+
+    def parse_spawn_flags(text: str):
+        """Parse optional flags from additional_text: --tree, --parent, --label, --count."""
+        flags = {"tree_id": "default", "parent_id": "root", "label": None, "count": 1}
+        pattern = r"--(tree|parent|label|count)\s+([^\s]+)"
+        for m in re.finditer(pattern, text):
+            key, val = m.group(1), m.group(2)
+            if key == 'tree': flags['tree_id'] = val
+            elif key == 'parent': flags['parent_id'] = val
+            elif key == 'label': flags['label'] = val
+            elif key == 'count':
+                try: flags['count'] = int(val)
+                except ValueError: pass
+        # strip flags from context_text
+        cleaned = re.sub(pattern, '', text).strip()
+        return flags, cleaned
 
     # --- Main Application Loop ---
     while True:
@@ -201,13 +218,48 @@ def main():
                 client.toggle_thinking_display()
                 continue
 
-            elif user_input.startswith("/spawn "):
-                # Accept JSON payload and let the assistant execute spawn_agents tool
-                payload = user_input[len("/spawn "):].strip()
+            elif user_input.startswith("/spawn"):
                 client.messages.append({"role": "user", "content": user_input})
+                # Parse like /pushContext
+                match = re.match(r"/spawn\s*(\S+\.md)?\s*(.*)", user_input)
+                if not match:
+                    console.print("[yellow]Usage: /spawn [<file_path.md>] [<additional_text with flags>] [/yellow]")
+                    continue
+                file_path = match.group(1)
+                rest = match.group(2).strip()
+                flags, cleaned_text = parse_spawn_flags(rest)
+                # Determine label
+                label = flags['label']
+                if not label:
+                    if file_path:
+                        label = os.path.splitext(os.path.basename(file_path))[0]
+                    else:
+                        label = (cleaned_text.split()[:1] or ["child"])[0]
+                # Build context_text: file content + cleaned_text
+                context_parts = []
+                if file_path:
+                    try:
+                        if file_path.startswith("global/"):
+                            script_dir = os.path.dirname(os.path.realpath(__file__))
+                            fp = os.path.join(script_dir, 'global_commands', file_path[len('global/'):])
+                        else:
+                            fp = file_path
+                        with open(fp, 'r', encoding='utf-8') as f:
+                            context_parts.append(f.read())
+                    except Exception as e:
+                        console.print(f"[red]Error reading file: {e}[/red]")
+                if cleaned_text:
+                    context_parts.append(cleaned_text)
+                context_text = "\n\n".join(context_parts).strip()
+                payload = {
+                    "tree_id": flags['tree_id'],
+                    "parent_id": flags['parent_id'],
+                    "specs": [{"label": label, "context_text": context_text, "count": flags['count']}],
+                    "max_active": flags['count'] if flags['count'] else 1
+                }
                 tool_call_json = json.dumps({
                     "tool_calls": [
-                        {"type": "function", "function": {"name": "spawn_agents", "arguments": payload or "{}"}}
+                        {"type": "function", "function": {"name": "spawn_agents", "arguments": json.dumps(payload)}}
                     ]
                 })
                 client.send_message(tool_call_json)
@@ -222,6 +274,25 @@ def main():
                     ]
                 })
                 client.send_message(tool_call_json)
+                continue
+
+            elif user_input.startswith("/tree"):
+                tree_id = user_input.split(maxsplit=1)[1] if len(user_input.split()) > 1 else 'default'
+                script = f".egg/agents/bin/list_agents.sh {tree_id}"
+                output = run_bash_script(script)
+                console.print(Panel(Text(output), title="[bold cyan]Agent Tree[/bold cyan]", border_style="cyan", box=client.boxStyle))
+                continue
+
+            elif user_input.startswith("/attach"):
+                parts = user_input.split()
+                if len(parts) < 2:
+                    console.print("[yellow]Usage: /attach <tree_id> [agent_id][/yellow]")
+                    continue
+                tree_id = parts[1]
+                agent_id = parts[2] if len(parts) > 2 else ''
+                script = f".egg/agents/bin/attach_agent.sh {tree_id} {agent_id}"
+                output = run_bash_script(script)
+                console.print(Panel(Text(output), title="[bold cyan]tmux attach[/bold cyan]", border_style="cyan", box=client.boxStyle))
                 continue
 
             client.send_message(user_input)
