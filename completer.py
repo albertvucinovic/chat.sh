@@ -23,7 +23,9 @@ class PtkCompleter(Completer):
         """Provides filesystem suggestions for a given prefix, handling '~'."""
         try:
             expanded_prefix = os.path.expanduser(prefix)
-            matches = glob.glob(expanded_prefix + '*')
+            # Handle paths with spaces by using glob.escape
+            escaped_prefix = glob.escape(expanded_prefix)
+            matches = glob.glob(escaped_prefix + '*')
             suggestions = []
             for match in matches:
                 normalized_match = match.replace('\\', '/')

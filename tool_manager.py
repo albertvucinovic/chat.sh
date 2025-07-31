@@ -135,16 +135,18 @@ def _read_json(path: Path) -> Any:
 
 
 def _next_child_id(children_dir: Path, base: str) -> str:
+    # Normalize the base name to handle spaces and special characters
+    normalized_base = base.replace(" ", "_").replace("/", "_").replace("\\", "_")
     max_idx = 0
     if children_dir.exists():
         for d in children_dir.iterdir():
-            if d.is_dir() and d.name.startswith(base + "-"):
+            if d.is_dir() and d.name.startswith(normalized_base + "-"):
                 try:
                     idx = int(d.name.split('-')[-1])
                     max_idx = max(max_idx, idx)
                 except ValueError:
                     continue
-    return f"{base}-{max_idx+1:03d}"
+    return f"{normalized_base}-{max_idx+1:03d}"
 
 
 # Utilities for pane/window targeting
@@ -249,7 +251,9 @@ def _spawn_into_parent_layer(session: str, tree_id: str, parent_id: str, run_scr
         target_for_child = _split_v(right_col)
 
     # Send child start command to the target pane
-    run_bash_script(f"tmux send-keys -t {target_for_child} '{run_script}' C-m")
+    # Properly escape the command for tmux send-keys
+    escaped_script = run_script.replace("'", "'\"'\"'")
+    run_bash_script(f"tmux send-keys -t {target_for_child} '{escaped_script}' C-m")
     return target_for_child
 
 
@@ -278,14 +282,15 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
             run_lines.append(f"export {k}='{v}'")
 
     if chat_sh.exists():
-        run_lines.append(f"exec \"{str(chat_sh)}\" --tree {tree_id} --inline")
+        run_lines.append(f"exec \"{str(chat_sh)}\" --tree '{tree_id}' --inline")
     else:
-        run_lines.append(f"exec python3 -u {str(chat_py)}")
+        run_lines.append(f"exec python3 -u '{str(chat_py)}'")
 
     run_sh_path.write_text("\n".join(run_lines) + "\n", encoding='utf-8')
     os.chmod(run_sh_path, 0o755)
 
-    run_cmd = str(run_sh_path)
+    # Properly quote the command for tmux send-keys
+    run_cmd = f"'{run_sh_path}'"
 
     # Spawn strictly by pane, never switching/creating windows
     child_pane = _spawn_into_parent_layer(session, tree_id, parent_id, run_cmd)
