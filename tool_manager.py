@@ -146,7 +146,14 @@ def _get_right_pane_index(session: str, window: str) -> str:
 def _spawn_in_right_column(session: str, window: str, cmd: str, make_right_if_missing: bool, first_on_right: bool):
     # Ensure right column exists
     if make_right_if_missing:
-        run_bash_script(f"tmux select-window -t {session}:{window} && tmux split-window -h -t {session}:{window}")
+        # Create a right-side pane only if we have a single pane (left only)
+        try:
+            pane_count_out = run_bash_script(f"tmux list-panes -t {session}:{window} | wc -l")
+            pane_count = int(pane_count_out.strip().split()[-1])
+        except Exception:
+            pane_count = 1
+        if pane_count <= 1:
+            run_bash_script(f"tmux select-window -t {session}:{window} && tmux split-window -h -t {session}:{window}")
     # Determine rightmost pane index and select it
     right_idx = _get_right_pane_index(session, window)
     run_bash_script(f"tmux select-window -t {session}:{window} && tmux select-pane -t {session}:{window}.{right_idx}")
@@ -156,8 +163,7 @@ def _spawn_in_right_column(session: str, window: str, cmd: str, make_right_if_mi
     else:
         # Split the right pane vertically and run in the new (active) bottom pane
         run_bash_script(f"tmux split-window -v -t {session}:{window}.{right_idx} && tmux send-keys -t {session}:{window} '{cmd}' C-m")
-    # Tidy layout
-    run_bash_script(f"tmux select-layout -t {session}:{window} tiled")
+    # Keep existing layout; do not force tiled layout to preserve left-right with stacked right panes
 
 
 def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, tree_id: str, parent_id: str):
@@ -168,7 +174,7 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
 
     # Prepare the launch command for the child
     if chat_sh.exists():
-        base_launch = f"cd '{parent_cwd}' && EG_AGENT_DIR='{agent_dir}' EG_TREE_ID='{tree_id}' EG_PARENT_ID='{parent_id}' EG_AGENT_ID='{child_id}' EG_INIT_CONTEXT_FILE='{init_ctx}' bash -lc '{chat_sh}'"
+        base_launch = f"cd '{parent_cwd}' && EG_AGENT_DIR='{agent_dir}' EG_TREE_ID='{tree_id}' EG_PARENT_ID='{parent_id}' EG_AGENT_ID='{child_id}' EG_INIT_CONTEXT_FILE='{init_ctx}' bash -lc '{chat_sh} --tree {tree_id} --inline'"
     else:
         base_launch = f"cd '{parent_cwd}' && EG_AGENT_DIR='{agent_dir}' EG_TREE_ID='{tree_id}' EG_PARENT_ID='{parent_id}' EG_AGENT_ID='{child_id}' EG_INIT_CONTEXT_FILE='{init_ctx}' bash -lc 'python3 -u {chat_py}'"
 
