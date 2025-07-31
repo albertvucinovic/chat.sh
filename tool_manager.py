@@ -123,28 +123,39 @@ def _parent_window_exists(session: str, parent_id: str) -> bool:
 def _parent_window_setup(session: str, parent_id: str, parent_cwd: str):
     # Create a window for the parent if missing; leave parent on the left pane
     if not _parent_window_exists(session, parent_id):
-        run_bash_script(f"tmux new-window -t {session} -n {parent_id} 'bash -lc ""cd '{parent_cwd}'; bash""'")
+        # Outer double quotes for tmux command, inner single quotes for bash -lc
+        cmd = f"tmux new-window -t {session} -n {parent_id} \"bash -lc 'cd \"{parent_cwd}\"; bash'\""
+        run_bash_script(cmd)
 
 
-def _select_rightmost_pane(session: str, window: str):
-    # Move focus to the rightmost pane by repeatedly moving right until no further movement occurs
-    # This is a simple and robust approach that doesn't depend on pane indices
-    for _ in range(10):
-        run_bash_script(f"tmux select-window -t {session}:{window} && tmux select-pane -R -t {session}:{window}")
+def _get_right_pane_index(session: str, window: str) -> str:
+    # Return the pane index of the rightmost pane. If not determinable, return the highest index.
+    info = run_bash_script(f"tmux list-panes -t {session}:{window} -F '#{{pane_index}} #{{pane_left}} #{{pane_right}}'")
+    right_index = None
+    highest_index = None
+    for line in info.strip().splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 3:
+            idx, left, right = parts[0], parts[1], parts[2]
+            highest_index = idx if highest_index is None or int(idx) > int(highest_index) else highest_index
+            if right == '1':
+                right_index = idx
+    return right_index or highest_index or '0'
 
 
-def _spawn_in_right_column(session: str, window: str, cmd: str, make_right_if_missing: bool, is_first_child_on_right: bool):
+def _spawn_in_right_column(session: str, window: str, cmd: str, make_right_if_missing: bool, first_on_right: bool):
     # Ensure right column exists
     if make_right_if_missing:
         run_bash_script(f"tmux select-window -t {session}:{window} && tmux split-window -h -t {session}:{window}")
-    # Select rightmost pane
-    _select_rightmost_pane(session, window)
-    if is_first_child_on_right:
+    # Determine rightmost pane index and select it
+    right_idx = _get_right_pane_index(session, window)
+    run_bash_script(f"tmux select-window -t {session}:{window} && tmux select-pane -t {session}:{window}.{right_idx}")
+    if first_on_right:
         # Run directly in the right pane
-        run_bash_script(f"tmux send-keys -t {session}:{window} '{cmd}' C-m")
+        run_bash_script(f"tmux send-keys -t {session}:{window}.{right_idx} '{cmd}' C-m")
     else:
-        # Split vertically to stack below and run
-        run_bash_script(f"tmux split-window -v -t {session}:{window} && tmux send-keys -t {session}:{window} '{cmd}' C-m")
+        # Split the right pane vertically and run in the new (active) bottom pane
+        run_bash_script(f"tmux split-window -v -t {session}:{window}.{right_idx} && tmux send-keys -t {session}:{window} '{cmd}' C-m")
     # Tidy layout
     run_bash_script(f"tmux select-layout -t {session}:{window} tiled")
 
@@ -173,13 +184,13 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
 
     if pane_count <= 1:
         # Create right column and run the first child there
-        _spawn_in_right_column(session, parent_id, base_launch, make_right_if_missing=True, is_first_child_on_right=True)
+        _spawn_in_right_column(session, parent_id, base_launch, make_right_if_missing=True, first_on_right=True)
     elif pane_count == 2:
         # Exactly two panes: left(parent) and right column exists with one child; run second child below
-        _spawn_in_right_column(session, parent_id, base_launch, make_right_if_missing=False, is_first_child_on_right=False)
+        _spawn_in_right_column(session, parent_id, base_launch, make_right_if_missing=False, first_on_right=False)
     else:
         # More than two panes: select rightmost and stack below
-        _spawn_in_right_column(session, parent_id, base_launch, make_right_if_missing=False, is_first_child_on_right=False)
+        _spawn_in_right_column(session, parent_id, base_launch, make_right_if_missing=False, first_on_right=False)
 
 
 def tool_spawn_agent(args: Dict) -> str:
@@ -328,6 +339,23 @@ def tool_write_result(args: Dict) -> str:
     (p / 'notify').mkdir(exist_ok=True, parents=True)
     (p / 'notify' / 'done').write_text('1')
     return json.dumps(res, indent=2)
+
+
+def _list_all_children_dirs(tree_id: str) -> List[Tuple[str, Path]]:
+    base = Path('.egg/agents') / tree_id
+    out: List[Tuple[str, Path]] = []
+    if not base.exists():
+        return out
+    for parent_dir in base.iterdir():
+        if not parent_dir.is_dir():
+            continue
+        children_root = parent_dir / 'children'
+        if not children_root.exists():
+            continue
+        for c in children_root.iterdir():
+            if c.is_dir():
+                out.append((c.name, c))
+    return out
 
 
 def parse_tool_calls_from_content(message_content: str) -> list:
