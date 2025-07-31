@@ -303,7 +303,7 @@ def main():
                 elif len(parts) >= 2:
                     tree_id = parts[1]
                     # Try to attach existing tmux session for the tree
-                    script = f".egg/agents/bin/attach_agent.sh {tree_id}"
+                    script = f"script/agents/attach_agent.sh {tree_id}"
                     output = run_bash_script(script)
                     if 'no server running' in output.lower() or 'no sessions' in output.lower():
                         console.print(Panel("Session not found. Tree reconstruction is not yet implemented in this step.", title="[bold yellow]/o attach[/bold yellow]", border_style="yellow", box=client.boxStyle))
@@ -344,7 +344,7 @@ def main():
                 if not os.path.isdir(children_dir):
                     console.print("[yellow]No children found for this agent.[/yellow]")
                     continue
-                output = run_bash_script(f".egg/agents/bin/list_agents.sh {tree_id}")
+                output = run_bash_script(f"script/agents/list_agents.sh {tree_id}")
                 console.print(Panel(Text(output), title="[bold cyan]Agent Tree[/bold cyan]", border_style="cyan", box=client.boxStyle))
                 continue
 
@@ -360,7 +360,7 @@ def main():
                 else:
                     tree_id = parts[1]
                     agent_id = parts[2] if len(parts) > 2 else ''
-                script = f".egg/agents/bin/attach_agent.sh {tree_id} {agent_id}"
+                script = f"script/agents/attach_agent.sh {tree_id} {agent_id}"
                 output = run_bash_script(script)
                 console.print(Panel(Text(output), title="[bold cyan]tmux attach[/bold cyan]", border_style="cyan", box=client.boxStyle))
                 continue
