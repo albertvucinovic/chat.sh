@@ -69,7 +69,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "wait_agents",
-        "description": "Wait for the specified list of child subagent IDs (strings) to finish. Pass an empty list to wait for all current children. Optional timeout_sec. Supports any_mode to return when any completes.",
+        "description": "Wait for specific child agent IDs (e.g., label-001) to finish. Use IDs exactly as shown by /tree. Pass [] to wait for all. Optional timeout_sec. Set any_mode=true to return when any completes.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -554,7 +554,10 @@ def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True
         elif fn_name == "spawn_agent":
             output = tool_spawn_agent(args)
         elif fn_name == "wait_agents":
-            output = tool_wait_agents(args)
+            try:
+                output = tool_wait_agents(args)
+            except KeyboardInterrupt:
+                output = json.dumps({"interrupted": True, "message": "wait_agents interrupted by user"}, indent=2)
         elif fn_name == "write_result":
             output = tool_write_result(args)
         elif fn_name == "list_agents":

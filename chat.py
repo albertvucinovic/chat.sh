@@ -249,14 +249,26 @@ def main():
                 additional_text = match.group(2).strip()
                 context_parts = []
                 label = None
+                # Validate file_path actually exists; otherwise treat everything as additional_text
+                resolved_fp = None
                 if file_path:
                     try:
                         if file_path.startswith("global/"):
                             script_dir = os.path.dirname(os.path.realpath(__file__))
-                            fp = os.path.join(script_dir, 'global_commands', file_path[len('global/'):])
+                            resolved_fp = os.path.join(script_dir, 'global_commands', file_path[len('global/'):])
                         else:
-                            fp = file_path
-                        with open(fp, 'r', encoding='utf-8') as f:
+                            resolved_fp = file_path
+                        if not (resolved_fp and os.path.isfile(resolved_fp)):
+                            additional_text = (file_path + ' ' + additional_text).strip()
+                            file_path = None
+                            resolved_fp = None
+                    except Exception:
+                        additional_text = (file_path + ' ' + additional_text).strip()
+                        file_path = None
+                        resolved_fp = None
+                if resolved_fp:
+                    try:
+                        with open(resolved_fp, 'r', encoding='utf-8') as f:
                             context_parts.append(f.read())
                         label = os.path.splitext(os.path.basename(file_path))[0]
                     except Exception as e:
@@ -295,14 +307,26 @@ def main():
                 additional_text = match.group(2).strip()
                 context_parts = []
                 label = None
+                # Validate file_path actually exists; otherwise treat everything as additional_text
+                resolved_fp = None
                 if file_path:
                     try:
                         if file_path.startswith("global/"):
                             script_dir = os.path.dirname(os.path.realpath(__file__))
-                            fp = os.path.join(script_dir, 'global_commands', file_path[len('global/'):])
+                            resolved_fp = os.path.join(script_dir, 'global_commands', file_path[len('global/'):])
                         else:
-                            fp = file_path
-                        with open(fp, 'r', encoding='utf-8') as f:
+                            resolved_fp = file_path
+                        if not (resolved_fp and os.path.isfile(resolved_fp)):
+                            additional_text = (file_path + ' ' + additional_text).strip()
+                            file_path = None
+                            resolved_fp = None
+                    except Exception:
+                        additional_text = (file_path + ' ' + additional_text).strip()
+                        file_path = None
+                        resolved_fp = None
+                if resolved_fp:
+                    try:
+                        with open(resolved_fp, 'r', encoding='utf-8') as f:
                             context_parts.append(f.read())
                         label = os.path.splitext(os.path.basename(file_path))[0]
                     except Exception as e:
@@ -337,7 +361,7 @@ def main():
                 parts = rest.split()
                 args_obj = {}
                 if len(parts) == 0:
-                    console.print("[yellow]Usage: /wait <child_id> [child_id2 ...] | any | all[/yellow]")
+                    console.print("[yellow]Usage: /wait <child_id> [child_id2 ...] | any | all\nUse child IDs exactly as shown by /tree (e.g., label-001).[/yellow]")
                     continue
                 if len(parts) == 1 and parts[0].lower() in ("any", "all"):
                     mode = parts[0].lower()
@@ -352,6 +376,11 @@ def main():
                     from tool_manager import tool_wait_agents
                     result_json = tool_wait_agents(args_obj)
                     console.print(Panel(Text(result_json), title="[bold green]Wait Agents[/bold green]", border_style="green", box=client.boxStyle))
+                    client.messages.append({"role": "tool", "name": "wait_agents", "tool_call_id": f"local_wait", "content": result_json})
+                except KeyboardInterrupt:
+                    # Gracefully handle Ctrl+C to cancel wait without exiting the app
+                    result_json = json.dumps({"interrupted": True, "message": "wait interrupted by user"}, indent=2)
+                    console.print(Panel(Text(result_json), title="[bold yellow]Wait Interrupted[/bold yellow]", border_style="yellow", box=client.boxStyle))
                     client.messages.append({"role": "tool", "name": "wait_agents", "tool_call_id": f"local_wait", "content": result_json})
                 except Exception:
                     # Fallback to model tool call
