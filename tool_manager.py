@@ -346,7 +346,10 @@ def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True
         args_raw = call["function"].get("arguments", "{}")
         args = json.loads(args_raw or "{}") if isinstance(args_raw, str) else (args_raw or {})
     except json.JSONDecodeError:
-        client.messages.append({"role": "tool", "name": fn_name, "tool_call_id": call["id"], "content": "Error: Invalid arguments."})
+        # Append and render error output visibly
+        tool_msg = {"role": "tool", "name": fn_name, "tool_call_id": call["id"], "content": "Error: Invalid arguments."}
+        client.messages.append(tool_msg)
+        client.display_manager.render_message(tool_msg)
         return
 
     if display_call:
@@ -391,4 +394,7 @@ def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True
         else:
             output = f"Unknown tool: {fn_name}"
 
-    client.messages.append({"role": "tool", "name": fn_name, "tool_call_id": call["id"], "content": output})
+    # Append and render the tool output visibly in chat
+    tool_msg = {"role": "tool", "name": fn_name, "tool_call_id": call["id"], "content": output}
+    client.messages.append(tool_msg)
+    client.display_manager.render_message(tool_msg)
