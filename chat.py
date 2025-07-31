@@ -74,7 +74,7 @@ def main():
             "Chat started. [bold]Tab[/bold] to autocomplete, [bold]Right Arrow[/bold] to accept.\n"
             "[bold]Ctrl+D[/bold] to submit. [bold]Ctrl+B[/bold] for borders. [bold]Ctrl+E[/bold] to clear. [bold]Ctrl+C[/bold] to exit.\n"
             "[bold]/pushContext <context_or_file.md>[/bold] - Push current chat and start new context.\n"
-            "[bold]/popContext <return_value>[/bold] - Pop context from stack and return to previous.\n"
+            "[bold]/popContext <return_value>[/bold] - Pop context from stack and return to previous. For subagents: finalize and return result to parent.\n"
             "[bold]/spawn <file.md?> <text>[/bold] - Spawn child like pushContext.\n"
             "[bold]/wait <child_id|all|any or space-separated list>[/bold] - Wait for child agents.\n"
             "[bold]/tree[/bold] - List children of current agent.  [bold]/attach <tree_id?> [agent_id?][/bold] - Attach tmux.\n",
@@ -98,8 +98,19 @@ def main():
             with open(init_ctx_file, 'r', encoding='utf-8') as f:
                 init_text = f.read().strip()
             if init_text:
-                instruction = "[SYSTEM NOTE: When you finish, call popContext with a concise return value (e.g., a path to your output or a short summary).]"
+                instruction = "[SYSTEM NOTE] You are a subagent. When you finish your task, you MUST call the /popContext command with a concise return value (e.g., a path to your output or a short summary). Example: /popContext ./output.md"
                 client.messages.append({"role": "user", "content": f"{instruction}\n\n{init_text}"})
+                # Display subagent info and initial context visibly
+                tree_id = os.environ.get('EG_TREE_ID')
+                parent_id = os.environ.get('EG_PARENT_ID')
+                agent_id = os.environ.get('EG_AGENT_ID')
+                console.print(Panel(
+                    f"Subagent active.\nTree: {tree_id}\nParent: {parent_id}\nAgent: {agent_id}\n\nWhen finished, run: /popContext <return_value>",
+                    title="[bold]Subagent Context[/bold]",
+                    border_style=client.get_border_style("magenta"),
+                    box=client.boxStyle
+                ))
+                console.print(Panel(Text(init_text), title="[bold]Initial Context[/bold]", border_style=client.get_border_style("cyan"), box=client.boxStyle))
                 client.send_message("")
                 if consumed_marker:
                     with open(consumed_marker, 'w') as cf:

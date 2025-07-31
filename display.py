@@ -49,6 +49,34 @@ class DisplayManager:
                     border_style="green",
                     box=self.client.boxStyle
                 ))
+                # Special pretty summary for wait_agents
+                try:
+                    if msg.get('name') == 'wait_agents':
+                        data = json.loads(msg.get('content') or '{}')
+                        results = data.get('results', {}) if isinstance(data, dict) else {}
+                        if results:
+                            lines: List[str] = []
+                            for cid, res in results.items():
+                                if not isinstance(res, dict):
+                                    res = {}
+                                rv = res.get('return_value', '')
+                                summ = res.get('summary', '')
+                                status = res.get('status', '')
+                                line = f"{cid}: {rv}" if rv else f"{cid}: (no return_value)"
+                                if summ:
+                                    line += f" — {summ}"
+                                if status and status != 'done':
+                                    line += f" [{status}]"
+                                lines.append(line)
+                            if lines:
+                                self.console.print(Panel(
+                                    Text("\n".join(lines)),
+                                    title="[bold cyan]Wait Results[/bold cyan]",
+                                    border_style=self.get_border_style("cyan"),
+                                    box=self.client.boxStyle
+                                ))
+                except Exception:
+                    pass
         except Exception as e:
             self.console.print(f"[red]Error rendering message: {e}[/red]")
 
