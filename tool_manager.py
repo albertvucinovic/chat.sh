@@ -56,7 +56,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "wait_agents",
-        "description": "Wait for the specified list of children to finish. which must be a list of child IDs. Optional timeout_sec.",
+        "description": "Wait for the specified list of children to finish. Pass an empty list to wait for all current children. Optional timeout_sec.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -290,15 +290,25 @@ def tool_wait_agents(args: Dict) -> str:
     if not tree_id:
         return json.dumps({"error": "No tree context found"})
 
-    if not isinstance(which, list) or not all(isinstance(x, (str, int)) for x in which):
-        return json.dumps({"error": "which must be a list of child ids"})
+    # If which is None or not a list, error. If it's an empty list, wait for all current children.
+    if not isinstance(which, list):
+        return json.dumps({"error": "which must be a list (empty list means all children)"})
 
-    target_ids = [str(x) for x in which]
+    all_children = _list_all_children_dirs(tree_id)
+    name_to_dir = {name: p for name, p in all_children}
+
+    if len(which) == 0:
+        target_ids = [name for name, _ in all_children]
+    else:
+        target_ids = [str(x) for x in which]
+
     start = time.time()
     results: Dict[str, Any] = {}
     pending = set(target_ids)
 
-    name_to_dir = {name: p for name, p in _list_all_children_dirs(tree_id)}
+    # If there are no targets at all, short return
+    if not pending:
+        return json.dumps({"completed": [], "results": {}, "pending": []}, indent=2)
 
     while pending:
         for cid in list(pending):
@@ -314,7 +324,8 @@ def tool_wait_agents(args: Dict) -> str:
         if timeout and (time.time() - start) > timeout:
             break
         # Refresh mapping in case new children appear
-        name_to_dir = {name: p for name, p in _list_all_children_dirs(tree_id)}
+        all_children = _list_all_children_dirs(tree_id)
+        name_to_dir = {name: p for name, p in all_children}
         time.sleep(1)
 
     return json.dumps({
