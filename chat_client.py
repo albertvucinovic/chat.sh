@@ -43,7 +43,8 @@ class ChatClient:
         self.console = Console(force_terminal=True, legacy_windows=False)
         self.display_manager = DisplayManager(self)
         self.headers = {"Content-Type": "application/json"}
-        self.borders_enabled = True
+        # Start with borders disabled by default
+        self.borders_enabled = False
         self.chat_dir = Path.cwd() / ".egg/localChats"
         self.chat_dir.mkdir(parents=True, exist_ok=True)
         self.current_model_key = os.environ.get("DEFAULT_MODEL", "OpenAI GPT-4o")
@@ -54,7 +55,8 @@ class ChatClient:
         self.context_stack = []
         self.original_system_prompt = ""
         self.aimd_content: str = ""
-        self.boxStyle = box.ROUNDED
+        # Use a minimal box when borders are disabled
+        self.boxStyle = box.MINIMAL
         self.yesToolFlag = False
         # Enable auto tool-call approval for subagents spawned with EG_YES_TOOL_FLAG
         try:
