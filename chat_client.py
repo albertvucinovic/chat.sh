@@ -120,34 +120,40 @@ class ChatClient:
             self.console.print("\n" + ("-" * 40) + "\n")
 
     def push_context(self, file_path: Optional[str] = None, additional_text: str = "") -> str:
-        """Save current chat and start completely fresh context, possibly from a file, with additional text."""
+        """Save current chat and start completely fresh context.
+        If file_path points to an existing file, include its contents.
+        Otherwise, treat parameters as inline text only.
+        """
         final_context_parts = []
         context_identifier = ""
-        
+
+        file_full_path: Optional[Path] = None
         if file_path:
-            context_identifier = file_path.split('/')[-1]
-            if file_path.startswith("global/"):
-                script_dir = Path(__file__).resolve().parent
-                file_full_path = script_dir / "global_commands" / file_path[len("global/"):]
-            else:
-                file_full_path = Path(file_path)
-                
+            # Resolve path and only read if it exists; otherwise, fall back to inline text
+            try:
+                if file_path.startswith("global/"):
+                    script_dir = Path(__file__).resolve().parent
+                    cand = script_dir / "global_commands" / file_path[len("global/"):]
+                else:
+                    cand = Path(file_path)
+                if cand.is_file():
+                    file_full_path = cand
+                    context_identifier = cand.name
+            except Exception:
+                file_full_path = None
+
+        if file_full_path is not None:
             try:
                 with open(file_full_path, 'r', encoding='utf-8') as f:
                     file_content = f.read()
                 final_context_parts.append(file_content)
-                
-            except FileNotFoundError:
-                error_msg = f"Error: File not found at '{file_full_path}'"
-                self.console.print(f"[bold red]{error_msg}[/bold red]")
-                return error_msg
             except Exception as e:
                 error_msg = f"Error reading file: {e}"
                 self.console.print(f"[bold red]{error_msg}[/bold red]")
                 return error_msg
 
         if additional_text:
-            if not context_identifier: # If no file, use part of additional_text as identifier
+            if not context_identifier:  # If no file, use part of additional_text as identifier
                 context_identifier = additional_text[:30].replace('\n', ' ')
             final_context_parts.append(additional_text)
 

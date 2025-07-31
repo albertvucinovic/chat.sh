@@ -544,7 +544,9 @@ def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True
         elif fn_name == "python":
             output = run_python_script(args.get("script", ""))
         elif fn_name == "pushContext":
-            output = client.push_context(args.get("context", ""))
+            # The pushContext tool may pass inline context text. Map it to additional_text.
+            ctx = args.get("context", "")
+            output = client.push_context(None, ctx)
         elif fn_name == "popContext":
             output = client.pop_context(args.get("return_value", ""))
         elif fn_name == "str_replace_editor":
