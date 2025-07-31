@@ -211,6 +211,7 @@ def main():
                 continue
 
             elif user_input.startswith("/spawn"):
+                # Always handle /spawn locally. Do not fallback to model tool-call on errors.
                 client.messages.append({"role": "user", "content": user_input})
                 match = re.match(r"/spawn\s*(\S+\.md)?\s*(.*)", user_input)
                 if not match:
@@ -232,27 +233,27 @@ def main():
                         label = os.path.splitext(os.path.basename(file_path))[0]
                     except Exception as e:
                         console.print(f"[red]Error reading file: {e}[/red]")
+                        continue
                 if additional_text:
                     context_parts.append(additional_text)
                 # Append finishing instruction after content
                 finishing_instruction = "[SYSTEM NOTE] You are a subagent. When you finish your task, you MUST call the /popContext command with a concise return value (e.g., a path to your output or a short summary). Example: /popContext ./output.md"
                 context_parts.append(finishing_instruction)
                 context_text = "\n\n".join(context_parts).strip()
+                if not context_text:
+                    console.print("[yellow]Usage: /spawn [<file_path.md>] [<additional_text>] [/yellow]")
+                    continue
                 if not label:
                     label = (additional_text.split()[:1] or ["child"])[0]
 
+                # Always use local tool spawn; on error, report and continue without involving model
                 try:
                     from tool_manager import tool_spawn_agent
                     result_json = tool_spawn_agent({"context_text": context_text, "label": label})
                     console.print(Panel(Text(result_json), title="[bold green]Spawned Agent[/bold green]", border_style="green", box=client.boxStyle))
                     client.messages.append({"role": "tool", "name": "spawn_agent", "tool_call_id": f"local_{label}", "content": result_json})
-                except Exception:
-                    tool_call_json = json.dumps({
-                        "tool_calls": [
-                            {"type": "function", "function": {"name": "spawn_agent", "arguments": json.dumps({"context_text": context_text, "label": label})}}
-                        ]
-                    })
-                    client.send_message(tool_call_json)
+                except Exception as e:
+                    console.print(Panel(f"Spawn failed: {e}", title="[bold red]Spawn Error[/bold red]", border_style="red", box=client.boxStyle))
                 continue
 
             elif user_input.startswith("/wait"):

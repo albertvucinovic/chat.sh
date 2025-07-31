@@ -121,32 +121,34 @@ def _parent_window_exists(session: str, parent_id: str) -> bool:
 
 
 def _parent_window_setup(session: str, parent_id: str, parent_cwd: str):
-    # Create a window for the parent if missing; leave parent on the left pane
     if not _parent_window_exists(session, parent_id):
-        # Outer double quotes for tmux command, inner single quotes for bash -lc
         cmd = f"tmux new-window -t {session} -n {parent_id} \"bash -lc 'cd \"{parent_cwd}\"; bash'\""
         run_bash_script(cmd)
 
 
-def _get_right_pane_index(session: str, window: str) -> str:
-    # Return the pane index of the rightmost pane. If not determinable, return the highest index.
-    info = run_bash_script(f"tmux list-panes -t {session}:{window} -F '#{{pane_index}} #{{pane_left}} #{{pane_right}}'")
-    right_index = None
-    highest_index = None
+def _right_pane_id(session: str, window: str) -> str:
+    info = run_bash_script(f"tmux list-panes -t {session}:{window} -F '#{{pane_id}} #{{pane_index}} #{{pane_right}}'")
+    right_id = None
+    highest_id = None
+    highest_idx = -1
     for line in info.strip().splitlines():
         parts = line.strip().split()
         if len(parts) >= 3:
-            idx, left, right = parts[0], parts[1], parts[2]
-            highest_index = idx if highest_index is None or int(idx) > int(highest_index) else highest_index
+            pid, idx_str, right = parts[0], parts[1], parts[2]
+            try:
+                idx = int(idx_str)
+            except Exception:
+                idx = -1
+            if highest_id is None or idx > highest_idx:
+                highest_id = pid
+                highest_idx = idx
             if right == '1':
-                right_index = idx
-    return right_index or highest_index or '0'
+                right_id = pid
+    return right_id or highest_id
 
 
-def _spawn_in_right_column(session: str, window: str, cmd: str, make_right_if_missing: bool, first_on_right: bool):
-    # Ensure right column exists
+def _spawn_in_right_column(session: str, window: str, run_script: str, make_right_if_missing: bool, first_on_right: bool):
     if make_right_if_missing:
-        # Create a right-side pane only if we have a single pane (left only)
         try:
             pane_count_out = run_bash_script(f"tmux list-panes -t {session}:{window} | wc -l")
             pane_count = int(pane_count_out.strip().split()[-1])
@@ -154,20 +156,16 @@ def _spawn_in_right_column(session: str, window: str, cmd: str, make_right_if_mi
             pane_count = 1
         if pane_count <= 1:
             run_bash_script(f"tmux select-window -t {session}:{window} && tmux split-window -h -t {session}:{window}")
-    # Determine rightmost pane index and select it
-    right_idx = _get_right_pane_index(session, window)
-    # Always select the right pane explicitly
-    run_bash_script(f"tmux select-window -t {session}:{window} && tmux select-pane -t {session}:{window}.{right_idx}")
+    right_pid = _right_pane_id(session, window)
+    if not right_pid:
+        run_bash_script(f"tmux select-window -t {session}:{window} && tmux split-window -h -t {session}:{window}")
+        right_pid = _right_pane_id(session, window)
 
     if first_on_right:
-        # Run directly in the right pane (target exact pane)
-        run_bash_script(f"tmux send-keys -t {session}:{window}.{right_idx} '{cmd}' C-m")
+        run_bash_script(f"tmux send-keys -t {right_pid} '{run_script}' C-m")
     else:
-        # Split the right pane vertically and run in the new (active) bottom pane
-        # Target the split at the right pane index to keep stacking on the right
-        run_bash_script(f"tmux split-window -v -t {session}:{window}.{right_idx}")
-        # After split, the new pane is active; send command to the active pane in this window
-        run_bash_script(f"tmux send-keys -t {session}:{window} '{cmd}' C-m")
+        run_bash_script(f"tmux split-window -v -t {right_pid}")
+        run_bash_script(f"tmux send-keys -t {session}:{window} '{run_script}' C-m")
 
 
 def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, tree_id: str, parent_id: str):
@@ -176,16 +174,31 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
     chat_py = (repo_root / 'chat.py').resolve()
     init_ctx = Path(agent_dir) / 'init_context.txt'
 
-    # Prepare the launch command for the child
+    # Prepare a per-child run script to avoid quoting/whitespace issues in tmux send-keys
+    run_sh_path = Path(agent_dir) / 'run.sh'
+    run_lines = [
+        "#!/usr/bin/env bash",
+        "set -e",
+        f"cd '{parent_cwd}'",
+        f"export EG_AGENT_DIR='{agent_dir}'",
+        f"export EG_TREE_ID='{tree_id}'",
+        f"export EG_PARENT_ID='{parent_id}'",
+        f"export EG_AGENT_ID='{child_id}'",
+        f"export EG_INIT_CONTEXT_FILE='{init_ctx}'",
+    ]
     if chat_sh.exists():
-        base_launch = f"cd '{parent_cwd}' && EG_AGENT_DIR='{agent_dir}' EG_TREE_ID='{tree_id}' EG_PARENT_ID='{parent_id}' EG_AGENT_ID='{child_id}' EG_INIT_CONTEXT_FILE='{init_ctx}' bash -lc '{chat_sh} --tree {tree_id} --inline'"
+        run_lines.append(f"exec \"{str(chat_sh)}\" --tree {tree_id} --inline")
     else:
-        base_launch = f"cd '{parent_cwd}' && EG_AGENT_DIR='{agent_dir}' EG_TREE_ID='{tree_id}' EG_PARENT_ID='{parent_id}' EG_AGENT_ID='{child_id}' EG_INIT_CONTEXT_FILE='{init_ctx}' bash -lc 'python3 -u {chat_py}'"
+        run_lines.append(f"exec python3 -u {str(chat_py)}")
 
-    # Ensure a window for the parent exists
+    run_sh_path.write_text("\n".join(run_lines) + "\n", encoding='utf-8')
+    os.chmod(run_sh_path, 0o755)
+
+    # The command to send to tmux is simply the path to run.sh
+    run_cmd = str(run_sh_path)
+
     _parent_window_setup(session, parent_id, parent_cwd)
 
-    # Determine current pane count to decide how to place children only in the right column
     pane_count_out = run_bash_script(f"tmux list-panes -t {session}:{parent_id} | wc -l")
     try:
         pane_count = int(pane_count_out.strip().split()[-1])
@@ -193,21 +206,17 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
         pane_count = 1
 
     if pane_count <= 1:
-        # Create right column and run the first child there
-        _spawn_in_right_column(session, parent_id, base_launch, make_right_if_missing=True, first_on_right=True)
+        _spawn_in_right_column(session, parent_id, run_cmd, make_right_if_missing=True, first_on_right=True)
     elif pane_count == 2:
-        # Exactly two panes: left(parent) and right column exists with one child; run second child below
-        _spawn_in_right_column(session, parent_id, base_launch, make_right_if_missing=False, first_on_right=False)
+        _spawn_in_right_column(session, parent_id, run_cmd, make_right_if_missing=False, first_on_right=False)
     else:
-        # More than two panes: select rightmost and stack below
-        _spawn_in_right_column(session, parent_id, base_launch, make_right_if_missing=False, first_on_right=False)
+        _spawn_in_right_column(session, parent_id, run_cmd, make_right_if_missing=False, first_on_right=False)
 
 
 def tool_spawn_agent(args: Dict) -> str:
     context_text = args.get('context_text', '').strip()
     label = (args.get('label') or 'child').strip() or 'child'
 
-    # Determine tree and parent
     tree_id = os.environ.get('EG_TREE_ID')
     if not tree_id:
         current = Path('.egg/agents/.current_tree')
@@ -224,14 +233,12 @@ def tool_spawn_agent(args: Dict) -> str:
     parent_id = os.environ.get('EG_AGENT_ID', 'root')
     parent_cwd = str(Path.cwd())
 
-    # Create child dir
     base_dir = Path('.egg/agents') / tree_id / parent_id / 'children'
     base_dir.mkdir(parents=True, exist_ok=True)
     child_id = _next_child_id(base_dir, label)
     child_dir = base_dir / child_id
     child_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save minimal state and messages
     state = {
         "agent_id": child_id,
         "parent_id": parent_id,
@@ -248,7 +255,6 @@ def tool_spawn_agent(args: Dict) -> str:
     ])
     (child_dir / 'init_context.txt').write_text(context_text or '', encoding='utf-8')
 
-    # Launch tmux child window/pane
     session = _ensure_session(tree_id)
     _launch_child(session, parent_cwd, str(child_dir), child_id, tree_id, parent_id)
 
@@ -280,7 +286,6 @@ def tool_wait_agents(args: Dict) -> str:
     def finished(child_dir: Path) -> bool:
         return (child_dir / 'result.json').exists()
 
-    # Figure out target children
     all_children: List[Tuple[str, Path]] = _list_all_children_dirs(tree_id)
     name_to_dir = {name: p for name, p in all_children}
 
@@ -293,7 +298,6 @@ def tool_wait_agents(args: Dict) -> str:
 
     pending = set(target_ids)
 
-    # If 'all' requested and there are no children, return empty set
     if which == 'all' and not pending:
         return json.dumps({
             "completed": [],
@@ -317,7 +321,6 @@ def tool_wait_agents(args: Dict) -> str:
             break
         if timeout and (time.time() - start) > timeout:
             break
-        # Refresh child list in case new children were added during wait
         all_children = _list_all_children_dirs(tree_id)
         name_to_dir = {name: p for name, p in all_children}
         time.sleep(1)
@@ -412,7 +415,6 @@ def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True
         args_raw = call["function"].get("arguments", "{}")
         args = json.loads(args_raw or "{}") if isinstance(args_raw, str) else (args_raw or {})
     except json.JSONDecodeError:
-        # Append and render error output visibly
         tool_msg = {"role": "tool", "name": fn_name, "tool_call_id": call["id"], "content": "Error: Invalid arguments."}
         client.messages.append(tool_msg)
         client.display_manager.render_message(tool_msg)
@@ -460,7 +462,6 @@ def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True
         else:
             output = f"Unknown tool: {fn_name}"
 
-    # Append and render the tool output visibly in chat
     tool_msg = {"role": "tool", "name": fn_name, "tool_call_id": call["id"], "content": output}
     client.messages.append(tool_msg)
     client.display_manager.render_message(tool_msg)
