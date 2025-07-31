@@ -196,6 +196,13 @@ def _split_v(target_pane: str) -> str:
     return _tmux_raw("tmux display-message -p '#{pane_id}'")
 
 
+def _kill_pane(pane_id: str):
+    if not pane_id:
+        return
+    # Try to kill; ignore errors (pane might already be gone)
+    run_bash_script(f"tmux kill-pane -t {pane_id} 2>/dev/null || true")
+
+
 # Spawning logic per requirements
 
 def _spawn_into_parent_layer(session: str, tree_id: str, parent_id: str, run_script: str) -> str:
@@ -367,6 +374,16 @@ def tool_wait_agents(args: Dict) -> str:
         all_children = _list_all_children_dirs(tree_id)
         name_to_dir = {name: p for name, p in all_children}
         time.sleep(1)
+
+    # Attempt to clean up panes of completed children
+    for cid in list(results.keys()):
+        cdir = name_to_dir.get(cid)
+        if not cdir:
+            continue
+        st = _read_json(cdir / 'state.json') or {}
+        pane_id = st.get('pane_id', '') if isinstance(st, dict) else ''
+        if pane_id:
+            _kill_pane(pane_id)
 
     return json.dumps({
         "completed": list(results.keys()),
