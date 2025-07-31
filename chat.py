@@ -99,7 +99,8 @@ def main():
                 init_text = f.read().strip()
             if init_text:
                 instruction = "[SYSTEM NOTE] You are a subagent. When you finish your task, you MUST call the /popContext command with a concise return value (e.g., a path to your output or a short summary). Example: /popContext ./output.md"
-                client.messages.append({"role": "user", "content": f"{instruction}\n\n{init_text}"})
+                # Do not prepend instruction here; child will see it displayed after context
+                client.messages.append({"role": "user", "content": init_text})
                 # Display subagent info and initial context visibly
                 tree_id = os.environ.get('EG_TREE_ID')
                 parent_id = os.environ.get('EG_PARENT_ID')
@@ -111,6 +112,7 @@ def main():
                     box=client.boxStyle
                 ))
                 console.print(Panel(Text(init_text), title="[bold]Initial Context[/bold]", border_style=client.get_border_style("cyan"), box=client.boxStyle))
+                console.print(Panel(Text(instruction), title="[bold]How to Finish[/bold]", border_style=client.get_border_style("yellow"), box=client.boxStyle))
                 client.send_message("")
                 if consumed_marker:
                     with open(consumed_marker, 'w') as cf:
@@ -211,6 +213,9 @@ def main():
                         console.print(f"[red]Error reading file: {e}[/red]")
                 if additional_text:
                     context_parts.append(additional_text)
+                # Append finishing instruction after content
+                finishing_instruction = "[SYSTEM NOTE] You are a subagent. When you finish your task, you MUST call the /popContext command with a concise return value (e.g., a path to your output or a short summary). Example: /popContext ./output.md"
+                context_parts.append(finishing_instruction)
                 context_text = "\n\n".join(context_parts).strip()
                 if not label:
                     label = (additional_text.split()[:1] or ["child"])[0]

@@ -118,19 +118,26 @@ def _next_child_id(children_dir: Path, base: str) -> str:
 def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, tree_id: str, parent_id: str):
     repo_root = Path(__file__).resolve().parent
     chat_sh = (repo_root / 'chat.sh').resolve()
+    chat_py = (repo_root / 'chat.py').resolve()
     init_ctx = Path(agent_dir) / 'init_context.txt'
+
     if chat_sh.exists():
         launch_cmd = f"'{chat_sh}'"
     else:
-        chat_py = (repo_root / 'chat.py').resolve()
         launch_cmd = f"python3 -u '{chat_py}'"
+
+    # Build a command that sets env, cds, and runs the launcher via bash -lc
+    # tmux new-window will run: bash -lc '<cmd>'
     cmd = (
         f"cd '{parent_cwd}' && "
         f"EG_AGENT_DIR='{agent_dir}' EG_TREE_ID='{tree_id}' EG_PARENT_ID='{parent_id}' EG_AGENT_ID='{child_id}' "
         f"EG_INIT_CONTEXT_FILE='{init_ctx}' "
         f"bash -lc {launch_cmd}"
     )
-    run_bash_script(f"tmux new-window -t {session} -n {child_id} 'bash -lc \"{cmd}\"'")
+
+    # Use outer double-quotes for tmux, inner single-quotes for bash -lc
+    tmux_cmd = f"tmux new-window -t {session} -n {child_id} \"bash -lc '{cmd}'\""
+    run_bash_script(tmux_cmd)
 
 
 def tool_spawn_agent(args: Dict) -> str:
@@ -213,18 +220,31 @@ def tool_wait_agents(args: Dict) -> str:
     def finished(child_dir: Path) -> bool:
         return (child_dir / 'result.json').exists()
 
+    # Determine targets
     if isinstance(which, list):
         target_ids = which
     elif which in ('all', 'any'):
-        target_ids = [d.name for d in agent_root.iterdir() if d.is_dir()]
+        if agent_root.exists():
+            target_ids = [d.name for d in agent_root.iterdir() if d.is_dir()]
+        else:
+            target_ids = []
     else:
         target_ids = [str(which)]
 
     pending = set(target_ids)
+
+    # If there are no targets and 'all' requested, return empty completion
+    if which == 'all' and not pending:
+        return json.dumps({
+            "completed": [],
+            "results": {},
+            "pending": []
+        }, indent=2)
+
     while pending:
         for cid in list(pending):
             cdir = agent_root / cid
-            if finished(cdir):
+            if cdir.exists() and finished(cdir):
                 try:
                     results[cid] = _read_json(cdir / 'result.json')
                 except Exception:
