@@ -119,8 +119,8 @@ def main():
                 init_text = f.read().strip()
             if init_text:
                 instruction = "[SYSTEM NOTE] You are a subagent. When you finish your task, you MUST call the /popContext command with a concise return value (e.g., a path to your output or a short summary). Example: /popContext ./output.md"
-                # Do not prepend instruction here; child will see it displayed after context
-                client.messages.append({"role": "user", "content": init_text})
+                # Ensure the model sees the instruction inline in the prompt
+                client.messages.append({"role": "user", "content": f"{init_text}\n\n{instruction}"})
                 # Display subagent info and initial context visibly
                 tree_id = os.environ.get('EG_TREE_ID')
                 parent_id = os.environ.get('EG_PARENT_ID')
@@ -289,7 +289,13 @@ def main():
                     base = Path('.egg/agents')
                     trees = [d.name for d in base.iterdir() if d.is_dir() and d.name != '.current_tree'] if base.exists() else []
                     current = os.environ.get('EG_TREE_ID', (base / '.current_tree').read_text().strip() if (base / '.current_tree').exists() else '')
-                    tree_list = "\n".join([("* " if t == current else "  ") + t for t in sorted(trees)]) or "<no trees>"
+                    lines = []
+                    for t in sorted(trees):
+                        if t == current:
+                            lines.append(f"* {t} (current)")
+                        else:
+                            lines.append(f"  {t}")
+                    tree_list = "\n".join(lines) or "<no trees>"
                     console.print(Panel(Text(tree_list), title="[bold cyan]Agent Trees[/bold cyan]", border_style="cyan", box=client.boxStyle))
                     continue
                 if len(parts) >= 3 and parts[1] == 'use':
