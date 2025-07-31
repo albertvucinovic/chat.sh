@@ -12,8 +12,6 @@ TOOLS = [
                                       "parameters": {"type": "object", "properties": {"script": {"type": "string"}}, "required": ["script"]}}},
     {"type": "function", "function": {"name": "python", "description": "Execute a Python script and return combined stdout/stderr.",
                                       "parameters": {"type": "object", "properties": {"script": {"type": "string"}}, "required": ["script"]}}},
-    {"type": "function", "function": {"name": "pushContext", "description": "Save current chat and start new context conversation.",
-                                      "parameters": {"type": "object", "properties": {"context": {"type": "string"}}, "required": ["context"]}}},
     {"type": "function", "function": {"name": "popContext", "description": "Save current chat and restore previous context conversation.",
                                       "parameters": {"type": "object", "properties": {"return_value": {"type": "string"}}, "required": ["return_value"]}}},
     {"type": "function", "function": {
@@ -70,6 +68,40 @@ TOOLS = [
     {"type": "function", "function": {
         "name": "wait_agents",
         "description": "Wait for specific child agent IDs (e.g., label-001) to finish. Use IDs exactly as shown by /tree. Pass [] to wait for all. Optional timeout_sec. Set any_mode=true to return when any completes.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "which": {"type": "array", "items": {"type": "string"}},
+                "timeout_sec": {"type": "integer"},
+                "any_mode": {"type": "boolean"}
+            },
+            "required": ["which"]
+        }
+    }},
+    {"type": "function", "function": {
+        "name": "write_result",
+        "description": "Write result.json and mark done for the current agent directory.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_dir": {"type": "string"},
+                "return_value": {"type": "string"},
+                "summary": {"type": "string"}
+            },
+            "required": ["agent_dir", "return_value"]
+        }
+    }},
+    {"type": "function", "function": {
+        "name": "list_agents",
+        "description": "List all children of the current tree, grouped by parent, with status.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "tree_id": {"type": "string"}
+            }
+        }
+    }}
+]
         "parameters": {
             "type": "object",
             "properties": {
@@ -204,7 +236,7 @@ def _write_child_pane_id(tree_id: str, parent_id: str, child_id: str, pane_id: s
 def _pane_exists(pane_id: str) -> bool:
     if not pane_id:
         return False
-    out = _tmux_raw(f"tmux list-panes -a -F '#{{pane_id}}' | grep -Fx {pane_id} || true")
+    out = _tmux_raw("tmux list-panes -a -F '#{pane_id}' | grep -Fx %s || true" % pane_id)
     return pane_id in (out.split() if out else [])
 
 
@@ -507,7 +539,7 @@ def parse_tool_calls_from_content(message_content: str) -> list:
     return tool_calls
 
 
-def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True):
+def handle_tool_call(client, call: Dict, display_call: bool = True):
     fn_name = call["function"]["name"]
     try:
         args_raw = call["function"].get("arguments", "{}")
@@ -543,10 +575,6 @@ def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True
             output = run_bash_script(args.get("script", ""))
         elif fn_name == "python":
             output = run_python_script(args.get("script", ""))
-        elif fn_name == "pushContext":
-            # The pushContext tool may pass inline context text. Map it to additional_text.
-            ctx = args.get("context", "")
-            output = client.push_context(None, ctx)
         elif fn_name == "popContext":
             output = client.pop_context(args.get("return_value", ""))
         elif fn_name == "str_replace_editor":

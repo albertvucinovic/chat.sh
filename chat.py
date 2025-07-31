@@ -65,31 +65,21 @@ def main():
         console.print(f"[bold red]Error: {e}[/bold red]")
         console.print("Please provide necessary API environment variables.")
         return
-
-    # Record current pane id for deterministic pane targeting
-    _record_tmux_pane_if_available(console)
-
-    def get_prompt_message():
-        model_name = client.current_model_key
-        return f"[You & {model_name}]: " if client.borders_enabled else f"You & {model_name}: "
-
-    def get_continuation_message(width, line_number, wrap_count):
-        return "[...] " if client.borders_enabled else "... "
-
-    session = PromptSession(
-        message=get_prompt_message,
-        completer=PtkCompleter(client),
-        auto_suggest=AutoSuggestFromHistory(),
-        multiline=True,
-        prompt_continuation=get_continuation_message,
+    console.print(
+        Panel(
+            "Chat started. [bold]Tab[/bold] to autocomplete, [bold]Right Arrow[/bold] to accept.\n"
+            "[bold]Ctrl+D[/bold] to submit. [bold]Ctrl+B[/bold] for borders. [bold]Ctrl+E[/bold] to clear. [bold]Ctrl+C[/bold] to exit.\n"
+            "[bold]/popContext <return_value>[/bold] - Pop context from stack and return to previous. For subagents: finalize and return result to parent.\n"
+            "[bold]/spawn <file.md?> <text>[/bold] - Spawn child with the given context.\n"
+            "[bold]/spawn_auto <file.md?> <text>[/bold] - Spawn child with auto tool-approval.\n"
+            "[bold]/wait <child_id|space-separated list>|any|all[/bold] - Wait for specific child agents, any, or all.\n"
+            "[bold]/tree[/bold] - List children in current tree.  [bold]/attach <tree_id?> [agent_id?][/bold] - Attach tmux.\n"
+            "[bold]/tree use <tree_id>[/bold] - Switch active agent tree for this session.  [bold]/tree list[/bold] - List existing trees.\n"
+            "[bold]/o <tree_id>|list[/bold] - Attach to a tree's tmux session (list to show trees).\n",
+            title="[bold]Welcome[/bold]",
+            border_style=client.get_border_style("magenta")
+        )
     )
-
-    kb = KeyBindings()
-
-    @kb.add("c-d")
-    def _(event):
-        event.app.exit(result=event.current_buffer.text)
-
     @kb.add("c-c")
     def _(event):
         event.app.exit(exception=KeyboardInterrupt)
@@ -100,38 +90,6 @@ def main():
 
     @kb.add('right')
     def _(event):
-        if event.current_buffer.complete_state:
-            completion = event.current_buffer.complete_state.current_completion
-            if completion:
-                event.current_buffer.apply_completion(completion)
-        else:
-            suggestion = event.current_buffer.suggestion
-            if suggestion:
-                event.current_buffer.insert_text(suggestion.text)
-
-    @kb.add("c-b")
-    def _(event):
-        client.toggle_borders()
-
-    session.key_bindings = kb
-
-    console.print(
-        Panel(
-            "Chat started. [bold]Tab[/bold] to autocomplete, [bold]Right Arrow[/bold] to accept.\n"
-            "[bold]Ctrl+D[/bold] to submit. [bold]Ctrl+B[/bold] for borders. [bold]Ctrl+E[/bold] to clear. [bold]Ctrl+C[/bold] to exit.\n"
-            "[bold]/pushContext <context_or_file.md>[/bold] - Push current chat and start new context.\n"
-            "[bold]/popContext <return_value>[/bold] - Pop context from stack and return to previous. For subagents: finalize and return result to parent.\n"
-            "[bold]/spawn <file.md?> <text>[/bold] - Spawn child like pushContext.\n"
-            "[bold]/spawn_auto <file.md?> <text>[/bold] - Spawn child with auto tool-approval.\n"
-            "[bold]/wait <child_id|space-separated list>|any|all[/bold] - Wait for specific child agents, any, or all.\n"
-            "[bold]/tree[/bold] - List children in current tree.  [bold]/attach <tree_id?> [agent_id?][/bold] - Attach tmux.\n"
-            "[bold]/tree use <tree_id>[/bold] - Switch active agent tree for this session.  [bold]/tree list[/bold] - List existing trees.\n"
-            "[bold]/o <tree_id>|list[/bold] - Attach to a tree's tmux session (list to show trees).\n",
-            title="[bold]Welcome[/bold]",
-            border_style=client.get_border_style("magenta")
-        )
-    )
-
     def shutdown():
         console.print("\n\n[bold yellow]Saving chat and exiting...[/bold yellow]")
         saved_path = client.save_chat()
@@ -159,6 +117,15 @@ def main():
                     title="[bold]Subagent Context[/bold]",
                     border_style=client.get_border_style("magenta"),
                     box=client.boxStyle
+                ))
+                console.print(Panel(Text(init_text), title="[bold]Initial Context[/bold]", border_style=client.get_border_style("cyan"), box=client.boxStyle))
+                console.print(Panel(Text(instruction), title="[bold]How to Finish[/bold]", border_style=client.get_border_style("yellow"), box=client.boxStyle))
+                client.send_message("")
+                if consumed_marker:
+                    with open(consumed_marker, 'w') as cf:
+                        cf.write('1')
+    except Exception:
+        pass
                 ))
                 console.print(Panel(Text(init_text), title="[bold]Initial Context[/bold]", border_style=client.get_border_style("cyan"), box=client.boxStyle))
                 console.print(Panel(Text(instruction), title="[bold]How to Finish[/bold]", border_style=client.get_border_style("yellow"), box=client.boxStyle))
@@ -200,23 +167,6 @@ def main():
                 client.messages.append({"role": "user", "content": user_input})
                 model_key = user_input[len("/model"):].strip()
                 client.switch_model(model_key)
-                continue
-
-            elif user_input.startswith("/pushContext"):
-                client.messages.append({"role": "user", "content": user_input})
-                match = re.match(r"/pushContext\s*(\S+\.md)?\s*(.*)", user_input)
-                if match:
-                    file_path = match.group(1)
-                    additional_text = match.group(2).strip()
-                    if file_path or additional_text:
-                        result = client.push_context(file_path, additional_text)
-                        console.print(Panel(result, title="[bold cyan]Context Management[/bold cyan]", border_style="cyan", box=client.boxStyle))
-                        if not result.startswith("Error:"):
-                            client.send_message("")
-                    else:
-                        console.print("[yellow]Usage: /pushContext [<file_path.md>] [<additional_text>][/yellow]")
-                else:
-                    console.print("[yellow]Usage: /pushContext [<file_path.md>] [<additional_text>][/yellow]")
                 continue
 
             elif user_input.startswith("/popContext"):

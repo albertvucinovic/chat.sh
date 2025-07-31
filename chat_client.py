@@ -125,6 +125,12 @@ class ChatClient:
         Otherwise, treat parameters as inline text only.
         """
         final_context_parts = []
+    def push_context(self, file_path: Optional[str] = None, additional_text: str = "") -> str:
+        """Save current chat and start completely fresh context.
+        If file_path points to an existing file, include its contents.
+        Otherwise, treat parameters as inline text only.
+        """
+        final_context_parts = []
         context_identifier = ""
 
         file_full_path: Optional[Path] = None
@@ -158,7 +164,7 @@ class ChatClient:
             final_context_parts.append(additional_text)
 
         if not final_context_parts:
-            return "Error: No context or file provided for pushContext."
+            return "Error: No context or file provided. Use /spawn or /spawn_auto instead."
 
         combined_context = "\n\n".join(final_context_parts).strip()
         
@@ -168,6 +174,18 @@ class ChatClient:
 
         saved_file_path = self._save_chat_messages_to_file(self.messages, "pushed_context", context_identifier or "no_file")
         self.context_stack.append(saved_file_path)
+        self._clear_display()
+        
+        # Start new context with the system prompt and the combined user message
+        self.messages = [{"role": "system", "content": self.original_system_prompt}, {"role": "user", "content": final_user_message_content}]
+        
+        self.display_manager.render_system_prompt(self.original_system_prompt)
+        self.display_manager.render_message({"role": "user", "content": final_user_message_content})
+        
+        self.console.print(Panel(f"[bold green]⬇️ Context Pushed[/bold green]", title="[bold]Entering New Context[/bold]", border_style="green", box=self.boxStyle))
+        self.console.print(f"[dim]Previous context saved to: {Path(saved_file_path).name}[/dim]")
+        
+        return f"Entered new context from: {file_path if file_path else 'additional text'}"
         self._clear_display()
         
         # Start new context with the system prompt and the combined user message
