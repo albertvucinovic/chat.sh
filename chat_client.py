@@ -188,6 +188,13 @@ class ChatClient:
             self.display_manager.render_message(self.messages[1])
             self.console.print(Panel(f"[bold red]⬆️ Context Pop (Stack Empty)[/bold red]", title="[bold]Context Management[/bold]", border_style="red", box=self.boxStyle))
             self.console.print(f"[dim]Current conversation saved: {Path(current_sub_context_file).name}[/dim]")
+            # In subagent mode, exit process after finishing
+            try:
+                if agent_dir:
+                    self.console.print("[bold green]Subagent finished. Exiting...[/bold green]")
+                    sys.exit(0)
+            except Exception:
+                pass
             return f"No previous context to return to. Return value: {return_value}"
         
         previous_context_file = self.context_stack.pop()

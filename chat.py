@@ -232,20 +232,30 @@ def main():
             elif user_input.startswith("/wait"):
                 rest = user_input[len("/wait"):].strip()
                 client.messages.append({"role": "user", "content": user_input})
+                # Build args
                 if not rest:
-                    args = json.dumps({"which": "all"})
+                    args_obj = {"which": "all"}
                 else:
                     parts = rest.split()
                     if len(parts) == 1:
-                        args = json.dumps({"which": parts[0]})
+                        args_obj = {"which": parts[0]}
                     else:
-                        args = json.dumps({"which": parts})
-                tool_call_json = json.dumps({
-                    "tool_calls": [
-                        {"type": "function", "function": {"name": "wait_agents", "arguments": args}}
-                    ]
-                })
-                client.send_message(tool_call_json)
+                        args_obj = {"which": parts}
+                # Try local execution first
+                try:
+                    from tool_manager import tool_wait_agents
+                    result_json = tool_wait_agents(args_obj)
+                    console.print(Panel(Text(result_json), title="[bold green]Wait Agents[/bold green]", border_style="green", box=client.boxStyle))
+                    client.messages.append({"role": "tool", "name": "wait_agents", "tool_call_id": f"local_wait", "content": result_json})
+                except Exception:
+                    # Fallback to model tool call
+                    args = json.dumps(args_obj)
+                    tool_call_json = json.dumps({
+                        "tool_calls": [
+                            {"type": "function", "function": {"name": "wait_agents", "arguments": args}}
+                        ]
+                    })
+                    client.send_message(tool_call_json)
                 continue
 
             elif user_input.startswith("/tree"):
