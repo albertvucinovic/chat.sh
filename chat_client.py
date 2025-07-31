@@ -49,7 +49,7 @@ class ChatClient:
         self.current_model_key = os.environ.get("DEFAULT_MODEL", "OpenAI GPT-4o")
         self.base_url = None
         self.models_config, self.providers_config = load_configs()
-        self.summary: Optional[str] = None
+        self.short_recap: Optional[str] = None
         self.tools = tool_manager.TOOLS
         self.context_stack = []
         self.original_system_prompt = ""
@@ -158,7 +158,7 @@ class ChatClient:
                 res = {
                     "status": "done",
                     "return_value": return_value,
-                    "summary": self.summary or "",
+                    "short_recap": self.short_recap or "",
                     "finished_at": int(datetime.datetime.now().timestamp())
                 }
                 with open(result_path, 'w') as f:
@@ -322,7 +322,7 @@ class ChatClient:
             # Add the model key to the assistant message for persistent storage
             assistant_msg["model_key"] = self.current_model_key
             
-            if assistant_msg.get("content"): self.summary = self.extract_summary(assistant_msg.get("content"))
+            if assistant_msg.get("content"): self.short_recap = self.extract_short_recap(assistant_msg.get("content"))
             self.messages.append(assistant_msg)
             
             if tool_calls := assistant_msg.get("tool_calls"):
@@ -358,13 +358,13 @@ class ChatClient:
     def get_border_style(self, style: str) -> str:
         return style if self.borders_enabled else "none"
 
-    def extract_summary(self, text):
-        try: return text.split("<summary>")[1].split("</summary>")[0].strip()
+    def extract_short_recap(self, text):
+        try: return text.split("<short_recap>")[1].split("</short_recap>")[0].strip()
         except IndexError: return None
 
     def save_chat(self) -> str:
-        summary = self.summary if self.summary else "chat_summary"
-        return self._save_chat_messages_to_file(self.messages, "", summary)
+        short_recap = self.short_recap if self.short_recap else "chat_summary"
+        return self._save_chat_messages_to_file(self.messages, "", short_recap)
 
     def _save_chat_messages_to_file(self, messages_to_save: List[Dict], file_prefix: str, identifier: str = "") -> str:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
