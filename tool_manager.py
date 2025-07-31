@@ -271,6 +271,12 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
         f"export EG_AGENT_ID='{child_id}'",
         f"export EG_INIT_CONTEXT_FILE='{init_ctx}'",
     ]
+
+    # Optional extra environment (e.g., EG_YES_TOOL_FLAG=1 for spawn_auto)
+    if extra_env:
+        for k, v in extra_env.items():
+            run_lines.append(f"export {k}='{v}'")
+
     if chat_sh.exists():
         run_lines.append(f"exec \"{str(chat_sh)}\" --tree {tree_id} --inline")
     else:

@@ -63,6 +63,18 @@ class ChatClient:
                 self.yesToolFlag = True
         except Exception:
             pass
+        # Also check agent state.json if running as a subagent
+        try:
+            agent_dir = os.environ.get("EG_AGENT_DIR")
+            if agent_dir:
+                st_path = Path(agent_dir) / 'state.json'
+                if st_path.exists():
+                    with open(st_path, 'r') as f:
+                        st = json.load(f)
+                    if isinstance(st, dict) and st.get('auto_tool_approve'):
+                        self.yesToolFlag = True
+        except Exception:
+            pass
         self.show_thinking = True
         self.in_single_turn_auto_execute_calls = False
 
