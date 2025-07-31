@@ -1,6 +1,5 @@
 import json
 import re
-import uuid
 import time
 import os
 from pathlib import Path
@@ -9,7 +8,6 @@ from typing import Dict, List, Any
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
-from prompt_toolkit.shortcuts import confirm
 
 from executors import run_bash_script, run_python_script, str_replace_editor, replace_lines
 
@@ -55,33 +53,29 @@ TOOLS = [
             },
             "required": ["file_path", "start_line", "end_line", "new_content"]
         }
-    }} ,
+    }},
     {"type": "function", "function": {
-        "name": "spawn_agents",
-        "description": "Spawn child agent directories and launch tmux windows for each child under a tree. Accepts JSON with tree_id, parent_id, specs (list of {label, model_key?, context_file?, context_text?, count?}), and optional max_active. Creates .egg/agents/<tree_id>/<parent_id>/children/<child_id> with initial state and runs chat.py in that cwd with EG_AGENT_DIR set.",
+        "name": "spawn_agent",
+        "description": "Spawn a single child agent by inferring tree and parent from environment. Returns {tree_id,parent_id,child_id,dir,session}.",
         "parameters": {
             "type": "object",
             "properties": {
-                "tree_id": {"type": "string"},
-                "parent_id": {"type": "string"},
-                "specs": {"type": "array"},
-                "max_active": {"type": "integer"}
+                "context_text": {"type": "string"},
+                "label": {"type": "string"}
             },
-            "required": ["tree_id", "parent_id", "specs"]
+            "required": ["context_text"]
         }
     }} ,
     {"type": "function", "function": {
         "name": "wait_agents",
-        "description": "Wait for children to finish. Args: tree_id, parent_id, which ('all'|'any'|[ids]), timeout_sec. Polls state/result files and returns aggregated results.",
+        "description": "Wait for children to finish for current parent. which: 'all'|'any'|child_id. Optional timeout_sec.",
         "parameters": {
             "type": "object",
             "properties": {
-                "tree_id": {"type": "string"},
-                "parent_id": {"type": "string"},
                 "which": {},
                 "timeout_sec": {"type": "integer"}
             },
-            "required": ["tree_id", "parent_id", "which"]
+            "required": ["which"]
         }
     }} ,
     {"type": "function", "function": {
@@ -99,10 +93,10 @@ TOOLS = [
     }}
 ]
 
+
 def _ensure_session(tree_id: str) -> str:
     session = f"egg-tree-{tree_id}"
-    # Check if session exists; if not, create
-    check = run_bash_script(f"tmux has-session -t {session} 2>/dev/null || tmux new-session -d -s {session} 'bash' ")
+    run_bash_script(f"tmux has-session -t {session} 2>/dev/null || tmux new-session -d -s {session} 'bash'")
     return session
 
 
@@ -120,90 +114,104 @@ def _read_json(path: Path) -> Any:
         return None
 
 
-def _init_child(agent_root: Path, tree_id: str, parent_id: str, label: str, idx: int, model_key: str, context_text: str) -> Dict[str, str]:
-    child_id = f"{label}-{idx:03d}"
-    child_dir = agent_root / tree_id / parent_id / 'children' / child_id
+def _next_child_id(children_dir: Path, base: str) -> str:
+    max_idx = 0
+    if children_dir.exists():
+        for d in children_dir.iterdir():
+            if d.is_dir() and d.name.startswith(base + "-"):
+                try:
+                    idx = int(d.name.split('-')[-1])
+                    max_idx = max(max_idx, idx)
+                except ValueError:
+                    continue
+    return f"{base}-{max_idx+1:03d}"
+
+
+def _launch_child(session: str, child_dir: str, child_id: str, tree_id: str, parent_id: str):
+    # find repo root chat.py path via git ls-files, per project rule use git grep/ls-files
+    cmd = (
+        "cd '" + child_dir + "' && "
+        f"EG_AGENT_DIR='{child_dir}' EG_TREE_ID='{tree_id}' EG_PARENT_ID='{parent_id}' EG_AGENT_ID='{child_id}' "
+        "python3 -u $(git ls-files|grep chat.py)"
+    )
+    run_bash_script(f"tmux new-window -t {session} -n {child_id} 'bash -lc \"{cmd}\"'")
+
+
+def tool_spawn_agent(args: Dict) -> str:
+    context_text = args.get('context_text', '').strip()
+    label = (args.get('label') or 'child').strip() or 'child'
+    # determine tree and parent
+    tree_id = os.environ.get('EG_TREE_ID')
+    if not tree_id:
+        # try to load last tree
+        cur_file = Path('.egg/agents/.current_tree')
+        if cur_file.exists():
+            try: tree_id = cur_file.read_text().strip()
+            except Exception: tree_id = None
+    if not tree_id:
+        tree_id = str(int(time.time()))
+        Path('.egg/agents').mkdir(parents=True, exist_ok=True)
+        Path('.egg/agents/.current_tree').write_text(tree_id)
+
+    parent_id = os.environ.get('EG_AGENT_ID', 'root')
+    base_dir = Path('.egg/agents') / tree_id / parent_id / 'children'
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    child_id = _next_child_id(base_dir, label)
+    child_dir = base_dir / child_id
     child_dir.mkdir(parents=True, exist_ok=True)
+
     state = {
         "agent_id": child_id,
         "parent_id": parent_id,
-        "status": "queued",
-        "model_key": model_key,
+        "status": "active",
+        "model_key": "",
         "spawned_at": int(time.time()),
         "children": [],
         "cwd": str(child_dir)
     }
     _write_json(child_dir / 'state.json', state)
-    # seed minimal messages.json
     messages = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": context_text}
     ]
     _write_json(child_dir / 'messages.json', messages)
-    return {"child_id": child_id, "dir": str(child_dir)}
 
-
-def _launch_child(session: str, child_dir: str, child_id: str):
-    cmd = (
-        f"cd {child_dir} && EG_AGENT_DIR='{child_dir}' \
-python3 -u $(git ls-files|grep chat.py)"  # find chat.py in repo
-    )
-    # open a new window running the chat
-    run_bash_script(f"tmux new-window -t {session} -n {child_id} 'bash -lc \"{cmd}\"'")
-
-
-def tool_spawn_agents(args: Dict) -> str:
-    tree_id = args.get('tree_id')
-    parent_id = args.get('parent_id', 'root')
-    specs = args.get('specs', [])
-    max_active = args.get('max_active', 0)
-    agent_root = Path('.egg/agents')
     session = _ensure_session(tree_id)
+    _launch_child(session, str(child_dir), child_id, tree_id, parent_id)
 
-    launched = []
-    for spec in specs:
-        label = spec.get('label', 'child')
-        count = int(spec.get('count', 1))
-        model_key = spec.get('model_key', '')
-        context_text = spec.get('context_text', '')
-        for i in range(1, count+1):
-            child = _init_child(agent_root, tree_id, parent_id, label, i, model_key, context_text)
-            launched.append(child)
-
-    # launch up to max_active or all if 0
-    to_launch = launched if max_active in (0, None) else launched[:max_active]
-    for ch in to_launch:
-        _launch_child(session, ch['dir'], ch['child_id'])
-        # mark as active
-        state_path = Path(ch['dir'])/ 'state.json'
-        st = _read_json(state_path) or {}
-        st['status'] = 'active'
-        _write_json(state_path, st)
-
-    return json.dumps({"session": session, "launched": launched}, indent=2)
+    return json.dumps({
+        "tree_id": tree_id,
+        "parent_id": parent_id,
+        "child_id": child_id,
+        "dir": str(child_dir),
+        "session": session
+    }, indent=2)
 
 
 def tool_wait_agents(args: Dict) -> str:
-    tree_id = args.get('tree_id')
-    parent_id = args.get('parent_id', 'root')
     which = args.get('which', 'all')
     timeout = int(args.get('timeout_sec', 0))
+    tree_id = os.environ.get('EG_TREE_ID')
+    if not tree_id:
+        try: tree_id = Path('.egg/agents/.current_tree').read_text().strip()
+        except Exception: tree_id = None
+    if not tree_id:
+        return json.dumps({"error": "No tree context found"})
+
+    parent_id = os.environ.get('EG_AGENT_ID', 'root')
     agent_root = Path('.egg/agents') / tree_id / parent_id / 'children'
 
     start = time.time()
     results: Dict[str, Any] = {}
 
     def finished(child_dir: Path) -> bool:
-        res = child_dir / 'result.json'
-        return res.exists()
+        return (child_dir / 'result.json').exists()
 
-    target_ids: List[str]
-    if which == 'all':
-        target_ids = [d.name for d in agent_root.iterdir() if d.is_dir()]
-    elif which == 'any':
-        target_ids = [d.name for d in agent_root.iterdir() if d.is_dir()]
-    elif isinstance(which, list):
+    if isinstance(which, list):
         target_ids = which
+    elif which in ('all', 'any'):
+        target_ids = [d.name for d in agent_root.iterdir() if d.is_dir()]
     else:
         target_ids = [str(which)]
 
@@ -212,7 +220,8 @@ def tool_wait_agents(args: Dict) -> str:
         for cid in list(pending):
             cdir = agent_root / cid
             if finished(cdir):
-                results[cid] = _read_json(cdir/ 'result.json')
+                try: results[cid] = _read_json(cdir/ 'result.json')
+                except Exception: results[cid] = {"status": "done"}
                 pending.remove(cid)
                 if which == 'any':
                     pending.clear()
@@ -324,21 +333,19 @@ def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True
             Syntax(display_content, syntax_lang, theme="monokai", line_numbers=client.borders_enabled), 
             title=f"[bold yellow]Tool Call: {fn_name}[/bold yellow]", border_style="yellow", box=client.boxStyle))
     
-    if client.in_single_turn_auto_execute_calls or client.yesToolFlag:
-        execute = True
-    else:
+    execute = True if (client.in_single_turn_auto_execute_calls or client.yesToolFlag) else None
+    if execute is None:
         while True:
             response = input(f"Execute the {fn_name} tool call? [y/n/a] ").strip().lower()
             if response in ('y', 'n', 'a'):
                 break
             print("Invalid input. Please enter y, n, or a")
-
         if response == 'a':
             client.in_single_turn_auto_execute_calls = True
             execute = True
         elif response == 'y':
             execute = True
-        else:  # response == 'n'
+        else:
             execute = False
    
     if not execute:
@@ -363,8 +370,8 @@ def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True
                 args.get("end_line"),
                 args.get("new_content")
             )
-        elif fn_name == "spawn_agents":
-            output = tool_spawn_agents(args)
+        elif fn_name == "spawn_agent":
+            output = tool_spawn_agent(args)
         elif fn_name == "wait_agents":
             output = tool_wait_agents(args)
         elif fn_name == "write_result":

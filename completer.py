@@ -241,7 +241,7 @@ class PtkCompleter(Completer):
                     pass
                 return
             else:
-                # Suggest child ids under the given tree
+                # Suggest child ids under the given tree; default parent root
                 tree_id = parts[1] if len(parts) > 1 else 'default'
                 prefix = parts[2] if len(parts) > 2 else ''
                 try:

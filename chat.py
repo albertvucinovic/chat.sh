@@ -90,8 +90,8 @@ def main():
             "[bold]Ctrl+D[/bold] to submit. [bold]Ctrl+B[/bold] for borders. [bold]Ctrl+E[/bold] to clear. [bold]Ctrl+C[/bold] to exit.\n"
             "[bold]/pushContext <context_or_file.md>[/bold] - Push current chat and start new context.\n"
             "[bold]/popContext <return_value>[/bold] - Pop context from stack and return to previous.\n"
-            "[bold]/spawn <file.md?> <text> [--tree X --parent Y --label Z --count N][/bold] - Spawn child like pushContext.\n"
-            "[bold]/wait {json}[/bold] - Wait for child agents (all/any/ids).\n"
+            "[bold]/spawn <file.md?> <text>[/bold] - Spawn child like pushContext.\n"
+            "[bold]/wait <child_id|all|any>[/bold] - Wait for child agents.\n"
             "[bold]/tree <tree_id>[/bold] - List agent tree.  [bold]/attach <tree_id> [agent_id][/bold] - Attach tmux.\n",
             title="[bold]Welcome[/bold]",
             border_style=client.get_border_style("magenta")
@@ -110,22 +110,6 @@ def main():
         saved_path = client.save_chat()
         console.print(f"[green]Chat saved to:[/green] {saved_path}")
         sys.exit(0)
-
-    def parse_spawn_flags(text: str):
-        """Parse optional flags from additional_text: --tree, --parent, --label, --count."""
-        flags = {"tree_id": "default", "parent_id": "root", "label": None, "count": 1}
-        pattern = r"--(tree|parent|label|count)\s+([^\s]+)"
-        for m in re.finditer(pattern, text):
-            key, val = m.group(1), m.group(2)
-            if key == 'tree': flags['tree_id'] = val
-            elif key == 'parent': flags['parent_id'] = val
-            elif key == 'label': flags['label'] = val
-            elif key == 'count':
-                try: flags['count'] = int(val)
-                except ValueError: pass
-        # strip flags from context_text
-        cleaned = re.sub(pattern, '', text).strip()
-        return flags, cleaned
 
     # --- Main Application Loop ---
     while True:
@@ -220,23 +204,14 @@ def main():
 
             elif user_input.startswith("/spawn"):
                 client.messages.append({"role": "user", "content": user_input})
-                # Parse like /pushContext
                 match = re.match(r"/spawn\s*(\S+\.md)?\s*(.*)", user_input)
                 if not match:
-                    console.print("[yellow]Usage: /spawn [<file_path.md>] [<additional_text with flags>] [/yellow]")
+                    console.print("[yellow]Usage: /spawn [<file_path.md>] [<additional_text>] [/yellow]")
                     continue
                 file_path = match.group(1)
-                rest = match.group(2).strip()
-                flags, cleaned_text = parse_spawn_flags(rest)
-                # Determine label
-                label = flags['label']
-                if not label:
-                    if file_path:
-                        label = os.path.splitext(os.path.basename(file_path))[0]
-                    else:
-                        label = (cleaned_text.split()[:1] or ["child"])[0]
-                # Build context_text: file content + cleaned_text
+                additional_text = match.group(2).strip()
                 context_parts = []
+                label = None
                 if file_path:
                     try:
                         if file_path.startswith("global/"):
@@ -246,20 +221,18 @@ def main():
                             fp = file_path
                         with open(fp, 'r', encoding='utf-8') as f:
                             context_parts.append(f.read())
+                        label = os.path.splitext(os.path.basename(file_path))[0]
                     except Exception as e:
                         console.print(f"[red]Error reading file: {e}[/red]")
-                if cleaned_text:
-                    context_parts.append(cleaned_text)
+                if additional_text:
+                    context_parts.append(additional_text)
                 context_text = "\n\n".join(context_parts).strip()
-                payload = {
-                    "tree_id": flags['tree_id'],
-                    "parent_id": flags['parent_id'],
-                    "specs": [{"label": label, "context_text": context_text, "count": flags['count']}],
-                    "max_active": flags['count'] if flags['count'] else 1
-                }
+                if not label:
+                    label = (additional_text.split()[:1] or ["child"])[0]
+
                 tool_call_json = json.dumps({
                     "tool_calls": [
-                        {"type": "function", "function": {"name": "spawn_agents", "arguments": json.dumps(payload)}}
+                        {"type": "function", "function": {"name": "spawn_agent", "arguments": json.dumps({"context_text": context_text, "label": label})}}
                     ]
                 })
                 client.send_message(tool_call_json)
@@ -268,9 +241,13 @@ def main():
             elif user_input.startswith("/wait "):
                 payload = user_input[len("/wait "):].strip()
                 client.messages.append({"role": "user", "content": user_input})
+                if payload.startswith('{') or payload.startswith('['):
+                    args = payload
+                else:
+                    args = json.dumps({"which": payload})
                 tool_call_json = json.dumps({
                     "tool_calls": [
-                        {"type": "function", "function": {"name": "wait_agents", "arguments": payload or "{}"}}
+                        {"type": "function", "function": {"name": "wait_agents", "arguments": args}}
                     ]
                 })
                 client.send_message(tool_call_json)
