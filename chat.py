@@ -95,8 +95,8 @@ def main():
             "[bold]/pushContext <context_or_file.md>[/bold] - Push current chat and start new context.\n"
             "[bold]/popContext <return_value>[/bold] - Pop context from stack and return to previous. For subagents: finalize and return result to parent.\n"
             "[bold]/spawn <file.md?> <text>[/bold] - Spawn child like pushContext.\n"
-            "[bold]/wait <child_id|all|any or space-separated list>[/bold] - Wait for child agents.\n"
-            "[bold]/tree[/bold] - List children of current agent.  [bold]/attach <tree_id?> [agent_id?][/bold] - Attach tmux.\n"
+            "[bold]/wait <child_id|space-separated list>[/bold] - Wait for specific child agents (all must be listed).\n"
+            "[bold]/tree[/bold] - List children in current tree.  [bold]/attach <tree_id?> [agent_id?][/bold] - Attach tmux.\n"
             "[bold]/tree use <tree_id>[/bold] - Switch active agent tree for this session.  [bold]/tree list[/bold] - List existing trees.\n"
             "[bold]/o <tree_id>|list[/bold] - Attach to a tree's tmux session (list to show trees).\n",
             title="[bold]Welcome[/bold]",
@@ -259,15 +259,12 @@ def main():
             elif user_input.startswith("/wait"):
                 rest = user_input[len("/wait"):].strip()
                 client.messages.append({"role": "user", "content": user_input})
-                # Build args
+                # Build args: require explicit list of ids
                 if not rest:
-                    args_obj = {"which": "all"}
-                else:
-                    parts = rest.split()
-                    if len(parts) == 1:
-                        args_obj = {"which": parts[0]}
-                    else:
-                        args_obj = {"which": parts}
+                    console.print("[yellow]Usage: /wait <child_id> [child_id2 child_id3 ...][/yellow]")
+                    continue
+                parts = rest.split()
+                args_obj = {"which": parts}
                 # Try local execution first
                 try:
                     from tool_manager import tool_wait_agents
@@ -338,14 +335,31 @@ def main():
                     continue
 
             elif user_input.startswith("/tree"):
-                tree_id = os.environ.get('EG_TREE_ID') or (open('.egg/agents/.current_tree').read().strip() if os.path.exists('.egg/agents/.current_tree') else 'default')
-                parent_id = os.environ.get('EG_AGENT_ID', 'root')
-                children_dir = os.path.join('.egg/agents', tree_id, parent_id, 'children')
-                if not os.path.isdir(children_dir):
-                    console.print("[yellow]No children found for this agent.[/yellow]")
-                    continue
-                output = run_bash_script(f"script/agents/list_agents.sh {tree_id}")
-                console.print(Panel(Text(output), title="[bold cyan]Agent Tree[/bold cyan]", border_style="cyan", box=client.boxStyle))
+                # Show all children across the tree using tool
+                try:
+                    from tool_manager import tool_list_agents
+                    result_json = tool_list_agents({"tree_id": os.environ.get('EG_TREE_ID')})
+                    console.print(Panel(Text(result_json), title="[bold cyan]Agent Tree[/bold cyan]", border_style="cyan", box=client.boxStyle))
+                    try:
+                        data = json.loads(result_json)
+                        parents = data.get("parents", {})
+                        lines = []
+                        for pid, children in parents.items():
+                            lines.append(f"{pid}:")
+                            for ch in children:
+                                cid = ch.get("child_id", "")
+                                status = ch.get("status", "")
+                                rv = ch.get("return_value", "")
+                                line = f"  - {cid} [{status}]"
+                                if rv:
+                                    line += f" — {rv}"
+                                lines.append(line)
+                        pretty = "\n".join(lines) or "<no children>"
+                        console.print(Panel(Text(pretty), title="[bold cyan]Agent Tree (Pretty)[/bold cyan]", border_style="cyan", box=client.boxStyle))
+                    except Exception:
+                        pass
+                except Exception as e:
+                    console.print(f"[red]Error listing agents: {e}[/red]")
                 continue
 
             elif user_input.startswith("/attach"):

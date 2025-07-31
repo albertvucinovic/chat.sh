@@ -77,6 +77,32 @@ class DisplayManager:
                                 ))
                 except Exception:
                     pass
+                # Pretty summary for list_agents
+                try:
+                    if msg.get('name') == 'list_agents':
+                        data = json.loads(msg.get('content') or '{}')
+                        parents = data.get('parents', {}) if isinstance(data, dict) else {}
+                        if parents:
+                            lines: List[str] = []
+                            for pid, children in parents.items():
+                                lines.append(f"{pid}:")
+                                for ch in children:
+                                    cid = ch.get('child_id', '')
+                                    status = ch.get('status', '')
+                                    rv = ch.get('return_value', '')
+                                    line = f"  - {cid} [{status}]"
+                                    if rv:
+                                        line += f" — {rv}"
+                                    lines.append(line)
+                            if lines:
+                                self.console.print(Panel(
+                                    Text("\n".join(lines)),
+                                    title="[bold cyan]Agent Tree[/bold cyan]",
+                                    border_style=self.get_border_style("cyan"),
+                                    box=self.client.boxStyle
+                                ))
+                except Exception:
+                    pass
         except Exception as e:
             self.console.print(f"[red]Error rendering message: {e}[/red]")
 

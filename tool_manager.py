@@ -56,11 +56,11 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "wait_agents",
-        "description": "Wait for children of current parent. which: 'all'|'any'|child_id. Optional timeout_sec.",
+        "description": "Wait for the specified list of children to finish. which must be a list of child IDs. Optional timeout_sec.",
         "parameters": {
             "type": "object",
             "properties": {
-                "which": {},
+                "which": {"type": "array", "items": {}},
                 "timeout_sec": {"type": "integer"}
             },
             "required": ["which"]
@@ -77,6 +77,16 @@ TOOLS = [
                 "summary": {"type": "string"}
             },
             "required": ["agent_dir", "return_value"]
+        }
+    }},
+    {"type": "function", "function": {
+        "name": "list_agents",
+        "description": "List all children of the current tree, grouped by parent, with status.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "tree_id": {"type": "string"}
+            }
         }
     }}
 ]
@@ -268,7 +278,7 @@ def tool_spawn_agent(args: Dict) -> str:
 
 
 def tool_wait_agents(args: Dict) -> str:
-    which = args.get('which', 'all')
+    which = args.get('which')
     timeout = int(args.get('timeout_sec', 0))
 
     tree_id = os.environ.get('EG_TREE_ID')
@@ -280,49 +290,31 @@ def tool_wait_agents(args: Dict) -> str:
     if not tree_id:
         return json.dumps({"error": "No tree context found"})
 
+    if not isinstance(which, list) or not all(isinstance(x, (str, int)) for x in which):
+        return json.dumps({"error": "which must be a list of child ids"})
+
+    target_ids = [str(x) for x in which]
     start = time.time()
     results: Dict[str, Any] = {}
-
-    def finished(child_dir: Path) -> bool:
-        return (child_dir / 'result.json').exists()
-
-    all_children: List[Tuple[str, Path]] = _list_all_children_dirs(tree_id)
-    name_to_dir = {name: p for name, p in all_children}
-
-    if isinstance(which, list):
-        target_ids = [str(x) for x in which]
-    elif which in ('all', 'any'):
-        target_ids = [name for name, _ in all_children]
-    else:
-        target_ids = [str(which)]
-
     pending = set(target_ids)
 
-    if which == 'all' and not pending:
-        return json.dumps({
-            "completed": [],
-            "results": {},
-            "pending": []
-        }, indent=2)
+    name_to_dir = {name: p for name, p in _list_all_children_dirs(tree_id)}
 
     while pending:
         for cid in list(pending):
             cdir = name_to_dir.get(cid)
-            if cdir and finished(cdir):
+            if cdir and (cdir / 'result.json').exists():
                 try:
                     results[cid] = _read_json(cdir / 'result.json')
                 except Exception:
                     results[cid] = {"status": "done"}
                 pending.remove(cid)
-                if which == 'any':
-                    pending.clear()
-                    break
         if not pending:
             break
         if timeout and (time.time() - start) > timeout:
             break
-        all_children = _list_all_children_dirs(tree_id)
-        name_to_dir = {name: p for name, p in all_children}
+        # Refresh mapping in case new children appear
+        name_to_dir = {name: p for name, p in _list_all_children_dirs(tree_id)}
         time.sleep(1)
 
     return json.dumps({
@@ -459,9 +451,49 @@ def handle_tool_call(client: "ChatClient", call: Dict, display_call: bool = True
             output = tool_wait_agents(args)
         elif fn_name == "write_result":
             output = tool_write_result(args)
+        elif fn_name == "list_agents":
+            output = tool_list_agents(args)
         else:
             output = f"Unknown tool: {fn_name}"
 
     tool_msg = {"role": "tool", "name": fn_name, "tool_call_id": call["id"], "content": output}
     client.messages.append(tool_msg)
     client.display_manager.render_message(tool_msg)
+
+
+def tool_list_agents(args: Dict) -> str:
+    tree_id = args.get('tree_id') or os.environ.get('EG_TREE_ID')
+    if not tree_id:
+        try:
+            tree_id = Path('.egg/agents/.current_tree').read_text().strip()
+        except Exception:
+            tree_id = None
+    if not tree_id:
+        return json.dumps({"error": "No tree context found"})
+    listing: Dict[str, List[Dict[str, Any]]] = {}
+    base = Path('.egg/agents') / tree_id
+    if not base.exists():
+        return json.dumps({"tree_id": tree_id, "parents": listing}, indent=2)
+    for parent_dir in base.iterdir():
+        if not parent_dir.is_dir():
+            continue
+        parent_id = parent_dir.name
+        children_root = parent_dir / 'children'
+        if not children_root.exists():
+            continue
+        children: List[Dict[str, Any]] = []
+        for c in children_root.iterdir():
+            if not c.is_dir():
+                continue
+            state = _read_json(c / 'state.json') or {}
+            res = _read_json(c / 'result.json')
+            status = "done" if isinstance(res, dict) else state.get("status", "active")
+            rv = res.get("return_value") if isinstance(res, dict) else None
+            children.append({
+                "child_id": c.name,
+                "status": status,
+                "return_value": rv
+            })
+        if children:
+            listing[parent_id] = children
+    return json.dumps({"tree_id": tree_id, "parents": listing}, indent=2)
