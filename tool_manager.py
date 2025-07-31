@@ -115,43 +115,71 @@ def _next_child_id(children_dir: Path, base: str) -> str:
     return f"{base}-{max_idx+1:03d}"
 
 
+def _parent_window_exists(session: str, parent_id: str) -> bool:
+    out = run_bash_script(f"tmux list-windows -t {session} -F '#{{window_name}}' | grep -Fx '{parent_id}' || true")
+    return parent_id in out.split()
+
+
+def _parent_window_setup(session: str, parent_id: str, parent_cwd: str):
+    # Create a window for the parent if missing; leave parent on the left pane
+    if not _parent_window_exists(session, parent_id):
+        run_bash_script(f"tmux new-window -t {session} -n {parent_id} 'bash -lc ""cd '{parent_cwd}'; bash""'")
+
+
+def _select_rightmost_pane(session: str, window: str):
+    # Move focus to the rightmost pane by repeatedly moving right until no further movement occurs
+    # This is a simple and robust approach that doesn't depend on pane indices
+    for _ in range(10):
+        run_bash_script(f"tmux select-window -t {session}:{window} && tmux select-pane -R -t {session}:{window}")
+
+
+def _spawn_in_right_column(session: str, window: str, cmd: str, make_right_if_missing: bool, is_first_child_on_right: bool):
+    # Ensure right column exists
+    if make_right_if_missing:
+        run_bash_script(f"tmux select-window -t {session}:{window} && tmux split-window -h -t {session}:{window}")
+    # Select rightmost pane
+    _select_rightmost_pane(session, window)
+    if is_first_child_on_right:
+        # Run directly in the right pane
+        run_bash_script(f"tmux send-keys -t {session}:{window} '{cmd}' C-m")
+    else:
+        # Split vertically to stack below and run
+        run_bash_script(f"tmux split-window -v -t {session}:{window} && tmux send-keys -t {session}:{window} '{cmd}' C-m")
+    # Tidy layout
+    run_bash_script(f"tmux select-layout -t {session}:{window} tiled")
+
+
 def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, tree_id: str, parent_id: str):
     repo_root = Path(__file__).resolve().parent
     chat_sh = (repo_root / 'chat.sh').resolve()
     chat_py = (repo_root / 'chat.py').resolve()
     init_ctx = Path(agent_dir) / 'init_context.txt'
 
+    # Prepare the launch command for the child
     if chat_sh.exists():
-        launch_cmd = f"'{chat_sh}'"
+        base_launch = f"cd '{parent_cwd}' && EG_AGENT_DIR='{agent_dir}' EG_TREE_ID='{tree_id}' EG_PARENT_ID='{parent_id}' EG_AGENT_ID='{child_id}' EG_INIT_CONTEXT_FILE='{init_ctx}' bash -lc '{chat_sh}'"
     else:
-        launch_cmd = f"python3 -u '{chat_py}'"
+        base_launch = f"cd '{parent_cwd}' && EG_AGENT_DIR='{agent_dir}' EG_TREE_ID='{tree_id}' EG_PARENT_ID='{parent_id}' EG_AGENT_ID='{child_id}' EG_INIT_CONTEXT_FILE='{init_ctx}' bash -lc 'python3 -u {chat_py}'"
 
-    cmd = (
-        f"cd '{parent_cwd}' && "
-        f"EG_AGENT_DIR='{agent_dir}' EG_TREE_ID='{tree_id}' EG_PARENT_ID='{parent_id}' EG_AGENT_ID='{child_id}' "
-        f"EG_INIT_CONTEXT_FILE='{init_ctx}' "
-        f"bash -lc {launch_cmd}"
-    )
+    # Ensure a window for the parent exists
+    _parent_window_setup(session, parent_id, parent_cwd)
 
-    tmux_cmd = f"tmux new-window -t {session} -n {child_id} \"bash -lc '{cmd}'\""
-    run_bash_script(tmux_cmd)
+    # Determine current pane count to decide how to place children only in the right column
+    pane_count_out = run_bash_script(f"tmux list-panes -t {session}:{parent_id} | wc -l")
+    try:
+        pane_count = int(pane_count_out.strip().split()[-1])
+    except Exception:
+        pane_count = 1
 
-
-def _list_all_children_dirs(tree_id: str) -> List[Tuple[str, Path]]:
-    base = Path('.egg/agents') / tree_id
-    out: List[Tuple[str, Path]] = []
-    if not base.exists():
-        return out
-    for parent_dir in base.iterdir():
-        if not parent_dir.is_dir():
-            continue
-        children_root = parent_dir / 'children'
-        if not children_root.exists():
-            continue
-        for c in children_root.iterdir():
-            if c.is_dir():
-                out.append((c.name, c))
-    return out
+    if pane_count <= 1:
+        # Create right column and run the first child there
+        _spawn_in_right_column(session, parent_id, base_launch, make_right_if_missing=True, is_first_child_on_right=True)
+    elif pane_count == 2:
+        # Exactly two panes: left(parent) and right column exists with one child; run second child below
+        _spawn_in_right_column(session, parent_id, base_launch, make_right_if_missing=False, is_first_child_on_right=False)
+    else:
+        # More than two panes: select rightmost and stack below
+        _spawn_in_right_column(session, parent_id, base_launch, make_right_if_missing=False, is_first_child_on_right=False)
 
 
 def tool_spawn_agent(args: Dict) -> str:
@@ -199,7 +227,7 @@ def tool_spawn_agent(args: Dict) -> str:
     ])
     (child_dir / 'init_context.txt').write_text(context_text or '', encoding='utf-8')
 
-    # Launch tmux child window
+    # Launch tmux child window/pane
     session = _ensure_session(tree_id)
     _launch_child(session, parent_cwd, str(child_dir), child_id, tree_id, parent_id)
 
