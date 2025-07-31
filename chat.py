@@ -97,7 +97,8 @@ def main():
             "[bold]/spawn <file.md?> <text>[/bold] - Spawn child like pushContext.\n"
             "[bold]/wait <child_id|all|any or space-separated list>[/bold] - Wait for child agents.\n"
             "[bold]/tree[/bold] - List children of current agent.  [bold]/attach <tree_id?> [agent_id?][/bold] - Attach tmux.\n"
-            "[bold]/tree use <tree_id>[/bold] - Switch active agent tree for this session.  [bold]/tree list[/bold] - List existing trees.\n",
+            "[bold]/tree use <tree_id>[/bold] - Switch active agent tree for this session.  [bold]/tree list[/bold] - List existing trees.\n"
+            "[bold]/o <tree_id>|list[/bold] - Attach to a tree's tmux session (list to show trees).\n",
             title="[bold]Welcome[/bold]",
             border_style=client.get_border_style("magenta")
         )
@@ -282,6 +283,32 @@ def main():
                     })
                     client.send_message(tool_call_json)
                 continue
+
+            elif user_input.startswith("/o"):
+                parts = user_input.split()
+                base = Path('.egg/agents')
+                if len(parts) == 1 or (len(parts) == 2 and parts[1] == 'list'):
+                    trees = [d.name for d in base.iterdir() if d.is_dir() and d.name != '.current_tree'] if base.exists() else []
+                    current = os.environ.get('EG_TREE_ID', (base / '.current_tree').read_text().strip() if (base / '.current_tree').exists() else '')
+                    lines = []
+                    for t in sorted(trees):
+                        if t == current:
+                            lines.append(f"* {t} (current)")
+                        else:
+                            lines.append(f"  {t}")
+                    tree_list = "\n".join(lines) or "<no trees>"
+                    console.print(Panel(Text(tree_list), title="[bold cyan]Trees (/o list)[/bold cyan]", border_style="cyan", box=client.boxStyle))
+                    continue
+                elif len(parts) >= 2:
+                    tree_id = parts[1]
+                    # Try to attach existing tmux session for the tree
+                    script = f".egg/agents/bin/attach_agent.sh {tree_id}"
+                    output = run_bash_script(script)
+                    if 'no server running' in output.lower() or 'no sessions' in output.lower():
+                        console.print(Panel("Session not found. Tree reconstruction is not yet implemented in this step.", title="[bold yellow]/o attach[/bold yellow]", border_style="yellow", box=client.boxStyle))
+                    else:
+                        console.print(Panel(Text(output), title="[bold cyan]tmux attach[/bold cyan]", border_style="cyan", box=client.boxStyle))
+                    continue
 
             elif user_input.startswith("/tree "):
                 parts = user_input.split()
