@@ -6,3 +6,5 @@ localChats
 commands
 __pycache*
 temp/
+generated/
+github/
