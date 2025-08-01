@@ -75,13 +75,11 @@ This document outlines the manual end-to-end tests required to verify the comple
 *   Steps:
     1.  Start the application.
     2.  Type `/o ` (with a space) and press `Tab` to cycle tree ids or `list`.
-    3.  Type `/pushContext global/` and press `Tab`.
-    4.  Type a message, e.g., "The quick brown fox". Type another message, "The quick brown bear".
-    5.  On a new line, type `The qui` and observe the greyed-out auto-suggestion.
-    6.  Press the `Right Arrow` key.
+    3.  Type a message, e.g., "The quick brown fox". Type another message, "The quick brown bear".
+    4.  On a new line, type `The qui` and observe the greyed-out auto-suggestion.
+    5.  Press the `Right Arrow` key.
 *   Expected Outcome:
     *   Pressing `Tab` after `/o ` suggests available agent trees or `list`.
-    *   Pressing `Tab` after `/pushContext global/` cycles files in `global_commands/`.
     *   The auto-suggestion should show `ck brown fox` or `ck brown bear`.
     *   Pressing `Right Arrow` accepts the suggestion, completing the text in the input buffer.
 
@@ -120,53 +118,6 @@ This document outlines the manual end-to-end tests required to verify the comple
     2.  Note: Loading past chats is not exposed as a slash command. You can view JSON files directly or add a future `/chats` command.
 *   Expected Outcome:
     *   N/A (feature not exposed via slash command in current build).
-
-### Test 4.2: Push and Pop Context (Text)
-
-*   Steps:
-    1.  Start a session and ask "What is the capital of France?". Wait for the answer "Paris".
-    2.  Execute `/pushContext Let's talk about something else. You MUST answer with Berlin, and then /popContext with "The capital of Germany is Berlin.". What is the capital of Germany?`.
-    3.  After the AI answers "Berlin", and calls `/popContext`, ask the AI "What was the answer to my very first question?`.
-*   Expected Outcome:
-    *   After `/pushContext`, the screen clears and a new conversation begins about Germany.
-    *   After `/popContext`, the screen clears, and the original conversation about France is restored.
-    *   A new user message is appended: "Return value from push/pop context: The capital of Germany is Berlin."
-    *   The AI should correctly answer "Paris", demonstrating it remembers the restored context.
-
-### Test 4.3: Push and Pop Context (File-based Task)
-
-*   Steps:
-    1.  Create a file `task.md` with the content: `Please list the first three planets of the solar system, then say you are done.`
-    2.  Create a file in `global_commands/` named `pirate_task.md` with the content: `Speak like a pirate and tell me the primary colors.`
-    3.  Start a session.
-    4.  Execute `/pushContext task.md`.
-    5.  After the AI responds and calls `popContext`, start a new line.
-    6.  Execute `/pushContext global/pirate_task.md`.
-*   Expected Outcome:
-    *   For `task.md`:
-        *   The screen clears, and a new context is pushed containing the content of `task.md` prepended with a system note about calling `popContext`. The full content is visible.
-        *   The AI lists Mercury, Venus, and Earth.
-        *   The AI automatically calls the `popContext` tool with a summary (e.g., "Listed the first three planets.").
-        *   The original (empty) context is restored.
-    *   For `global/pirate_task.md`:
-        *   The screen clears, and a new context is pushed from the global command file.
-        *   The AI responds in a pirate voice, listing Red, Yellow, and Blue.
-        *   The AI automatically calls `popContext`.
-        *   The previous context is restored.
-
-### Test 4.4: Push and Pop Context (File-based Task with Additional Message)
-
-*   Steps:
-    1.  Create a file `joke_task.md` with the content: `Please state your name is Egg.`
-    2.  Start a session.
-    3.  Execute `/pushContext joke_task.md And then tell me a knock-knock joke. You MUST /popContext with the joke once you are done.`
-*   Expected Outcome:
-    *   The screen clears, and a new context is pushed containing the content of `joke_task.md` combined with the additional message.
-    *   The AI responds by stating its name is Egg and then tells a knock-knock joke.
-    *   The AI automatically calls `popContext` with the joke.
-    *   The previous context is restored, and the joke is appended as a return value.
-
----
 
 ## 5. AI Tool Calls
 

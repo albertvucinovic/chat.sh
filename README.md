@@ -29,7 +29,6 @@ Egg is a powerful, terminal-based chat application designed for developers and p
   - Ctrl+B: Toggle UI borders on/off.
   - Ctrl+E: Clear the current input.
 - Context and Subagents:
-  - Manage conversation context with `/pushContext` and `/popContext`.
   - Spawn subagents with `/spawn`. Subagents run in panes within the same window as the parent:
     - First child: vertical split (right column).
     - Siblings: horizontal splits stacked inside the right column.
@@ -83,10 +82,8 @@ Run the application with:
   Switch the active AI model. Typing `/model ` and pressing Tab lists available models.
 
 - Context commands
-  - /pushContext <message_or_filepath_and_message>
-    Start a new context from text or a .md file (local or `global/`). Include instructions that the subagent should `/popContext` when done.
   - /popContext <return_value>
-    Return to the previous context and append the return value into the parent context.
+    Return to the previous context and append the return value into the parent context after /spawn.
 
 - /spawn [<file.md>] [<additional text>]
   Spawn a subagent. Layout rule per parent:
