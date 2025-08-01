@@ -18,6 +18,15 @@ class PtkCompleter(Completer):
         self.all_commands = [
             "/model", "/popContext", "/toggleYesToolFlag", "/toggleThinkingDisplay", "/o", "/b", "/replace_lines", "/spawn", "/spawn_auto", "/wait", "/tree", "/attach"
         ]
+
+    def _get_filesystem_suggestions(self, prefix: str) -> List[str]:
+        """Provides filesystem suggestions for a given prefix, handling '~'."""
+        try:
+            expanded_prefix = os.path.expanduser(prefix)
+            escaped_prefix = glob.escape(expanded_prefix)
+            matches = glob.glob(escaped_prefix + '*')
+            suggestions = []
+            for match in matches:
                 normalized_match = match.replace('\\', '/')
                 if os.path.isdir(normalized_match):
                     suggestions.append(normalized_match + '/')
@@ -28,17 +37,11 @@ class PtkCompleter(Completer):
             return []
 
     def get_completions(self, document: Document, complete_event) -> Iterable[Completion]:
-        """
-        The main completion logic, structured as a clear if/elif/else chain
-        to ensure only one completion type is active at a time.
-        """
         text = document.text_before_cursor
         words = text.split(' ')
 
-        # Handler for: /o <tree_id>|list
         if text.startswith("/o"):
             parts = text.split()
-            # Suggest subcommands or tree ids
             base = Path('.egg/agents')
             try:
                 trees = []
@@ -48,17 +51,14 @@ class PtkCompleter(Completer):
                 trees = []
 
             if text == "/o" or text == "/o ":
-                # Offer list and tree ids
                 yield Completion("list", start_position=0)
                 for t in sorted(trees):
                     yield Completion(t, start_position=0)
                 return
 
             if text.startswith("/o list"):
-                # Nothing more to complete after list
                 return
 
-            # Completing tree ids after "/o "
             if text.startswith("/o "):
                 prefix = text[len("/o "):]
                 for t in sorted(trees):
@@ -66,7 +66,6 @@ class PtkCompleter(Completer):
                         yield Completion(t, start_position=-len(prefix))
                 return
 
-        # Handler for: /model <model_key>
         elif text.startswith("/model "):
             prefix = text[len("/model "):]
             if self.client.models_config:
@@ -75,7 +74,6 @@ class PtkCompleter(Completer):
                         yield Completion(name, start_position=-len(prefix))
             return
 
-        # Spawn Auto mirrors file path and words
         elif text.startswith("/spawn_auto"):
             input_after_command = text[len("/spawn_auto"):].lstrip()
             current_fragment = document.get_word_before_cursor(WORD=True)
@@ -128,7 +126,6 @@ class PtkCompleter(Completer):
                     yield Completion(w, start_position=-len(current_fragment))
             return
 
-        # Spawn mirrors file path and words
         elif text.startswith("/spawn"):
             input_after_command = text[len("/spawn"):].lstrip()
             current_fragment = document.get_word_before_cursor(WORD=True)

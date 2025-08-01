@@ -9,132 +9,25 @@ from executors import run_bash_script, run_python_script, str_replace_editor, re
 
 TOOLS = [
     {"type": "function", "function": {"name": "bash", "description": "Execute a bash script and return combined stdout/stderr.",
-                                      "parameters": {"type": "object", "properties": {"script": {"type": "string"}}, "required": ["script"]}}},
+        "parameters": {"type": "object", "properties": {"script": {"type": "string"}}, "required": ["script"]}}},
     {"type": "function", "function": {"name": "python", "description": "Execute a Python script and return combined stdout/stderr.",
-                                      "parameters": {"type": "object", "properties": {"script": {"type": "string"}}, "required": ["script"]}}},
+        "parameters": {"type": "object", "properties": {"script": {"type": "string"}}, "required": ["script"]}}},
     {"type": "function", "function": {"name": "popContext", "description": "Save current chat and restore previous context conversation.",
-                                      "parameters": {"type": "object", "properties": {"return_value": {"type": "string"}}, "required": ["return_value"]}}},
-    {"type": "function", "function": {
-        "name": "str_replace_editor",
-        "description": "Replace specific text in files (exact literal match, including whitespace).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "file_path": {"type": "string"},
-                "old_str": {"type": "string"},
-                "new_str": {"type": "string"}
-            },
-            "required": ["file_path", "old_str", "new_str"]
-        }
-    }},
-    {"type": "function", "function": {
-        "name": "replace_lines",
-        "description": "Replaces a specified range of lines in a file with new content.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "file_path": {"type": "string"},
-                "start_line": {"type": "integer"},
-                "end_line": {"type": "integer"},
-                "new_content": {"type": "string"}
-            },
-            "required": ["file_path", "start_line", "end_line", "new_content"]
-        }
-    }},
-    {"type": "function", "function": {
-        "name": "spawn_agent",
-        "description": "Spawn a single child agent using current CWD as working dir. Returns {tree_id,parent_id,child_id,dir,session}.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "context_text": {"type": "string"},
-                "label": {"type": "string"}
-            },
-            "required": ["context_text"]
-        }
-    }},
-    {"type": "function", "function": {
-        "name": "spawn_agent_auto",
-        "description": "Spawn a single child agent using current CWD as working dir with auto-approval for tool calls (EG_YES_TOOL_FLAG=1). Returns {tree_id,parent_id,child_id,dir,session}.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "context_text": {"type": "string"},
-                "label": {"type": "string"}
-            },
-            "required": ["context_text"]
-        }
-    }},
-    {"type": "function", "function": {
-        "name": "wait_agents",
-        "description": "Wait for specific child agent IDs (e.g., label-001) to finish. Use IDs exactly as shown by /tree. Pass [] to wait for all. Optional timeout_sec. Set any_mode=true to return when any completes.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "which": {"type": "array", "items": {"type": "string"}},
-                "timeout_sec": {"type": "integer"},
-                "any_mode": {"type": "boolean"}
-            },
-            "required": ["which"]
-        }
-    }},
-    {"type": "function", "function": {
-        "name": "write_result",
-        "description": "Write result.json and mark done for the current agent directory.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "agent_dir": {"type": "string"},
-                "return_value": {"type": "string"},
-                "summary": {"type": "string"}
-            },
-            "required": ["agent_dir", "return_value"]
-        }
-    }},
-    {"type": "function", "function": {
-        "name": "list_agents",
-        "description": "List all children of the current tree, grouped by parent, with status.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "tree_id": {"type": "string"}
-            }
-        }
-    }}
-]
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "which": {"type": "array", "items": {"type": "string"}},
-                "timeout_sec": {"type": "integer"},
-                "any_mode": {"type": "boolean"}
-            },
-            "required": ["which"]
-        }
-    }},
-    {"type": "function", "function": {
-        "name": "write_result",
-        "description": "Write result.json and mark done for the current agent directory.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "agent_dir": {"type": "string"},
-                "return_value": {"type": "string"},
-                "summary": {"type": "string"}
-            },
-            "required": ["agent_dir", "return_value"]
-        }
-    }},
-    {"type": "function", "function": {
-        "name": "list_agents",
-        "description": "List all children of the current tree, grouped by parent, with status.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "tree_id": {"type": "string"}
-            }
-        }
-    }}
+        "parameters": {"type": "object", "properties": {"return_value": {"type": "string"}}, "required": ["return_value"]}}},
+    {"type": "function", "function": {"name": "str_replace_editor", "description": "Replace specific text in files (exact literal match, including whitespace).",
+        "parameters": {"type": "object", "properties": {"file_path": {"type": "string"}, "old_str": {"type": "string"}, "new_str": {"type": "string"}}, "required": ["file_path", "old_str", "new_str"]}}},
+    {"type": "function", "function": {"name": "replace_lines", "description": "Replaces a specified range of lines in a file with new content.",
+        "parameters": {"type": "object", "properties": {"file_path": {"type": "string"}, "start_line": {"type": "integer"}, "end_line": {"type": "integer"}, "new_content": {"type": "string"}}, "required": ["file_path", "start_line", "end_line", "new_content"]}}},
+    {"type": "function", "function": {"name": "spawn_agent", "description": "Spawn a single child agent using current CWD as working dir. Returns {tree_id,parent_id,child_id,dir,session}.",
+        "parameters": {"type": "object", "properties": {"context_text": {"type": "string"}, "label": {"type": "string"}}, "required": ["context_text"]}}},
+    {"type": "function", "function": {"name": "spawn_agent_auto", "description": "Spawn a single child agent using current CWD as working dir with auto-approval for tool calls (EG_YES_TOOL_FLAG=1). Returns {tree_id,parent_id,child_id,dir,session}.",
+        "parameters": {"type": "object", "properties": {"context_text": {"type": "string"}, "label": {"type": "string"}}, "required": ["context_text"]}}},
+    {"type": "function", "function": {"name": "wait_agents", "description": "Wait for specific child agent IDs (e.g., label-001) to finish. Use IDs exactly as shown by /tree. Pass [] to wait for all. Optional timeout_sec. Set any_mode=true to return when any completes.",
+        "parameters": {"type": "object", "properties": {"which": {"type": "array", "items": {"type": "string"}}, "timeout_sec": {"type": "integer"}, "any_mode": {"type": "boolean"}}, "required": ["which"]}}},
+    {"type": "function", "function": {"name": "write_result", "description": "Write result.json and mark done for the current agent directory.",
+        "parameters": {"type": "object", "properties": {"agent_dir": {"type": "string"}, "return_value": {"type": "string"}, "summary": {"type": "string"}}, "required": ["agent_dir", "return_value"]}}},
+    {"type": "function", "function": {"name": "list_agents", "description": "List all children of the current tree, grouped by parent, with status.",
+        "parameters": {"type": "object", "properties": {"tree_id": {"type": "string"}}}}}
 ]
 
 
@@ -167,7 +60,6 @@ def _read_json(path: Path) -> Any:
 
 
 def _next_child_id(children_dir: Path, base: str) -> str:
-    # Normalize the base name to handle spaces and special characters
     normalized_base = base.replace(" ", "_").replace("/", "_").replace("\\", "_")
     max_idx = 0
     if children_dir.exists():
@@ -262,28 +154,21 @@ def _kill_pane(pane_id: str):
 def _spawn_into_parent_layer(session: str, tree_id: str, parent_id: str, run_script: str) -> str:
     parent_pane = _read_parent_pane_id(tree_id, parent_id)
     if not parent_pane:
-        # Try fallback: the active pane of the current tmux client
         parent_pane = _tmux_raw("tmux display-message -p '#{pane_id}'")
         if not parent_pane:
-            # Last-ditch: try first pane in the first window of session
             out = _tmux_raw(f"tmux list-panes -t {session} -F '#{{pane_id}}' | head -n1")
             parent_pane = out.splitlines()[0].strip() if out else ""
     if not parent_pane:
         return ""
 
-    # Check if a right column already exists for this parent and is alive
     right_col = _read_parent_right_column_pane(tree_id, parent_id)
     if not right_col or not _pane_exists(right_col):
-        # First child in this layer OR previous right column was killed: create new right column
         right_col = _split_h(parent_pane)
         _write_parent_right_column_pane(tree_id, parent_id, right_col)
         target_for_child = right_col
     else:
-        # Subsequent child: stack within right column by horizontal split
         target_for_child = _split_v(right_col)
 
-    # Send child start command to the target pane
-    # Properly escape the command for tmux send-keys
     escaped_script = run_script.replace("'", "'\"'\"'")
     run_bash_script(f"tmux send-keys -t {target_for_child} '{escaped_script}' C-m")
     return target_for_child
@@ -295,7 +180,6 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
     chat_py = (repo_root / 'chat.py').resolve()
     init_ctx = Path(agent_dir) / 'init_context.txt'
 
-    # Prepare a per-child run script to avoid quoting/whitespace issues in tmux send-keys
     run_sh_path = Path(agent_dir) / 'run.sh'
     run_lines = [
         "#!/usr/bin/env bash",
@@ -308,7 +192,6 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
         f"export EG_INIT_CONTEXT_FILE='{init_ctx}'",
     ]
 
-    # Optional extra environment (e.g., EG_YES_TOOL_FLAG=1 for spawn_auto)
     if extra_env:
         for k, v in extra_env.items():
             run_lines.append(f"export {k}='{v}'")
@@ -321,13 +204,8 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
     run_sh_path.write_text("\n".join(run_lines) + "\n", encoding='utf-8')
     os.chmod(run_sh_path, 0o755)
 
-    # Properly quote the command for tmux send-keys
     run_cmd = f"'{run_sh_path}'"
-
-    # Spawn strictly by pane, never switching/creating windows
     child_pane = _spawn_into_parent_layer(session, tree_id, parent_id, run_cmd)
-
-    # Persist the new child's pane id so it can act as parent later
     if child_pane:
         _write_child_pane_id(tree_id, parent_id, child_id, child_pane)
 
