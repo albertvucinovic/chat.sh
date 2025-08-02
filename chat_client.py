@@ -40,8 +40,8 @@ class ChatClient:
         return out[::-1]
 
     def __init__(self):
-        # Let Rich auto-detect terminal capabilities; do NOT force terminal
-        self.console = Console()
+        # Restore borders by forcing terminal features; we'll avoid Live in tmux
+        self.console = Console(force_terminal=True, legacy_windows=False)
         self.display_manager = DisplayManager(self)
         self.headers = {"Content-Type": "application/json"}
         # Start with borders disabled by default
@@ -325,9 +325,7 @@ class ChatClient:
             in_tmux = bool(os.environ.get("TMUX"))
             try:
                 if in_tmux:
-                    # Simple streaming in tmux: avoid Live and avoid Panels while streaming
-                    # Print a small header once to separate responses
-                    self.console.print(Panel("Streaming response...", title=f"[bold cyan]Assistant ({self.current_model_key})[/bold cyan]", border_style="cyan", box=self.boxStyle))
+                    # In tmux: avoid Live and avoid per-chunk printing to keep prompt intact
                     response = requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": True}, timeout=120, stream=True)
                     response.raise_for_status()
 
@@ -342,12 +340,6 @@ class ChatClient:
 
                         if content := delta.get("content"):
                             assistant_text_parts.append(content)
-                            # Write raw content without rewrapping/panels
-                            try:
-                                self.console.print(content, end="")
-                            except TypeError:
-                                # Older Rich may not support end=; fallback
-                                self.console.print(content)
                         if reason := delta.get("reasoning_content"):
                             reasoning_parts.append(reason)
                         if tc_chunk := delta.get("tool_calls"):
@@ -411,6 +403,12 @@ class ChatClient:
             
             if assistant_msg.get("content"): self.short_recap = self.extract_short_recap(assistant_msg.get("content"))
             self.messages.append(assistant_msg)
+
+            # After stream completes, render once (prevents prompt garbling)
+            try:
+                self.display_manager.render_message(assistant_msg)
+            except Exception:
+                pass
             
             if tool_calls := assistant_msg.get("tool_calls"):
                 for tc in tool_calls: tool_manager.handle_tool_call(self, tc, display_call=should_redisplay)
