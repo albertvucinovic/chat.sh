@@ -1,6 +1,6 @@
 import json
 from collections import OrderedDict
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 from rich.console import Console, Group
 from rich.panel import Panel
@@ -187,6 +187,69 @@ class DisplayManager:
             out = out.replace('\\"', '"').replace("\\'", "'")
         return out
 
+    def _build_pretty_tool_call_renderables(self, name: str, args_str: str) -> List[Any]:
+        """Build a pretty, syntax-highlighted representation of a tool call's arguments.
+        Attempts to parse JSON; code-like fields are rendered with Syntax; others as text/json.
+        """
+        renderables: List[Any] = []
+        title = f"[bold yellow]Tool Call: {name}[/bold yellow]"
+        # Try to parse JSON
+        parsed: Optional[Any] = None
+        try:
+            parsed = json.loads(args_str or "{}")
+        except Exception:
+            parsed = None
+
+        def is_code_like(val: str) -> bool:
+            if not isinstance(val, str):
+                return False
+            if "\n" in val:
+                return True
+            if val.strip().startswith("```"):
+                return True
+            # simple heuristics
+            candidates = ["def ", "#!/", "#!/usr", "{", "}", ";", "$(", "function "]
+            return any(tok in val for tok in candidates)
+
+        def language_for(name_: str, key: str, val: str) -> str:
+            if name_.lower() in ("bash", "sh"):
+                return "bash"
+            if name_.lower() in ("python",):
+                return "python"
+            # Guess from key
+            if key.lower() in ("script", "bash", "shell"):
+                return "bash"
+            if key.lower() in ("py", "python_code"):
+                return "python"
+            return "text"
+
+        if parsed is None or not isinstance(parsed, dict):
+            # Fallback: show raw string
+            renderables.append(Panel(Text(args_str or "{}", no_wrap=False, overflow="fold"), title=title, border_style="yellow", box=self.client.boxStyle))
+            return renderables
+
+        # Build per-field panels, code fields nicely syntax-highlighted
+        sub_renders: List[Any] = []
+        for k, v in parsed.items():
+            if isinstance(v, str) and is_code_like(v):
+                lang = language_for(name, k, v)
+                if lang == "text":
+                    sub_renders.append(Panel(Text(v, no_wrap=False, overflow="fold"), title=f"[bold]{k}[/bold]", border_style="yellow", box=self.client.boxStyle))
+                else:
+                    sub_renders.append(Panel(Syntax(v, lang, theme="monokai", line_numbers=self.client.borders_enabled, word_wrap=True), title=f"[bold]{k}[/bold]", border_style="yellow", box=self.client.boxStyle))
+            else:
+                # Pretty-print non-code JSON values
+                try:
+                    pretty = json.dumps(v, indent=2, ensure_ascii=False) if not isinstance(v, str) else v
+                except Exception:
+                    pretty = str(v)
+                sub_renders.append(Panel(Text(pretty, no_wrap=False, overflow="fold"), title=f"[bold]{k}[/bold]", border_style="yellow", box=self.client.boxStyle))
+
+        if not sub_renders:
+            sub_renders.append(Text("{}", no_wrap=False, overflow="fold"))
+        renderables.append(Panel(Group(*sub_renders), title=title, border_style="yellow", box=self.client.boxStyle))
+        return renderables
+
     def render_message(self, msg: Dict, is_loading: bool = False) -> None:
         try:
             role = msg.get("role")
@@ -263,7 +326,7 @@ class DisplayManager:
         except Exception as e:
             self.console.print(f"[red]Error rendering message: {e}[/red]")
 
-    def _create_assistant_panel(self, msg: Dict, live_model_name: Optional[str] = None) -> Panel:
+    def _create_assistant_panel(self, msg: Dict, live_model_name: Optional[str] = None, pretty_tool_calls: bool = False) -> Panel:
         content = msg.get("content", "")
         tool_calls = msg.get("tool_calls", [])
         renderables = []
@@ -275,32 +338,36 @@ class DisplayManager:
             for tc in tool_calls:
                 func = tc.get("function", {})
                 name, args_str = func.get("name", "..."), func.get("arguments", "")
-                # Pretty if valid JSON & script; else show raw/optionally-unescaped args
-                script = None
-                try:
-                    parsed = json.loads(args_str or '{}')
-                    if isinstance(parsed, dict):
-                        script = parsed.get('script')
-                except Exception:
-                    script = None
-                if script and name in ["python", "bash"]:
-                    lang = name
-                    renderables.append(Panel(
-                        Syntax(script, lang, theme="monokai", line_numbers=self.client.borders_enabled, word_wrap=True),
-                        title=f"[bold yellow]Tool Call: {name}[/bold yellow]",
-                        border_style="yellow",
-                        box=self.client.boxStyle
-                    ))
+                if pretty_tool_calls:
+                    # Final pass: pretty print
+                    renderables.extend(self._build_pretty_tool_call_renderables(name, args_str))
                 else:
-                    pretty = args_str or ""
-                    if self.unescape_tool_display:
-                        pretty = self._unescape_for_tool(name, pretty)
-                    renderables.append(Panel(
-                        Text(pretty, no_wrap=False, overflow="fold"),
-                        title=f"[bold yellow]Tool Call: {name}[/bold yellow]",
-                        border_style="yellow",
-                        box=self.client.boxStyle
-                    ))
+                    # Streaming/raw pass
+                    script = None
+                    try:
+                        parsed = json.loads(args_str or '{}')
+                        if isinstance(parsed, dict):
+                            script = parsed.get('script')
+                    except Exception:
+                        script = None
+                    if script and name in ["python", "bash"]:
+                        lang = name
+                        renderables.append(Panel(
+                            Syntax(script, lang, theme="monokai", line_numbers=self.client.borders_enabled, word_wrap=True),
+                            title=f"[bold yellow]Tool Call: {name}[/bold yellow]",
+                            border_style="yellow",
+                            box=self.client.boxStyle
+                        ))
+                    else:
+                        pretty = args_str or ""
+                        if self.unescape_tool_display:
+                            pretty = self._unescape_for_tool(name, pretty)
+                        renderables.append(Panel(
+                            Text(pretty, no_wrap=False, overflow="fold"),
+                            title=f"[bold yellow]Tool Call: {name}[/bold yellow]",
+                            border_style="yellow",
+                            box=self.client.boxStyle
+                        ))
         if not renderables:
             renderables.append(Text("[No content or tool calls]"))
         border_style = "cyan" if self.client.borders_enabled else "none"
@@ -414,7 +481,9 @@ class DisplayManager:
                 except Exception:
                     pass
                 self._live = None
-            self.console.print(self._create_assistant_panel(final_assistant_msg, live_model_name=self.client.current_model_key))
+            # Final pretty-printed panel for tool calls
+            pretty_msg = dict(final_assistant_msg)
+            self.console.print(self._create_assistant_panel(pretty_msg, live_model_name=self.client.current_model_key, pretty_tool_calls=True))
         elif mode == "tmux":
             if self._tmux_active_id is not None:
                 cur = self._tmux_sessions.get(self._tmux_active_id)
@@ -451,7 +520,7 @@ class DisplayManager:
                     try:
                         import json as _json
                         parsed = _json.loads(args_str or "{}")
-                        script = parsed.get("script", "")
+                        script = parsed.get("script", "") if isinstance(parsed, dict) else ""
                         if script and name in ["bash", "python"]:
                             lang = "bash" if name == "bash" else "python"
                             sub_renders.append(Panel(Syntax(script, lang, theme="monokai", line_numbers=self.client.borders_enabled, word_wrap=True), title=title, border_style="yellow", box=self.client.boxStyle))
