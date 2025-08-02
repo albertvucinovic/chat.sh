@@ -181,8 +181,14 @@ def main():
                 script_to_run = user_input[2:].strip()
                 if script_to_run:
                     output = run_bash_script(script_to_run)
-                    output_renderable = Text(output)
-                    console.print(Panel(output_renderable, title="[bold green]Local Command Output[/bold green]", border_style="green", box=client.boxStyle))
+                    # Render a header even without borders
+                    header = f"Local Command Output"
+                    if client.borders_enabled:
+                        output_renderable = Text(output)
+                        console.print(Panel(output_renderable, title="[bold green]Local Command Output[/bold green]", border_style="green", box=client.boxStyle))
+                    else:
+                        console.print(f"--- {header} ---")
+                        console.print(Text(output))
                     context_message = (
                         "User executed a local command.\n"
                         f"Command:\n```bash\n{script_to_run}\n```\n\n"

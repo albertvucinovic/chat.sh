@@ -166,10 +166,13 @@ class DisplayManager:
             self._live.__enter__()
             self._live.update(self.create_live_display(None, {}), refresh=True)
         elif mode == "tmux":
+            # Always show a header, even if borders are off
             if self.client.borders_enabled:
+                import shutil
+                from rich import box as _box
                 width = shutil.get_terminal_size((80, 20)).columns
                 self._tmux_box_width = max(20, width - 2)
-                if self.client.boxStyle is box.ROUNDED:
+                if self.client.boxStyle is _box.ROUNDED:
                     tl, tr, h = "╭", "╮", "─"
                 else:
                     tl, tr, h = "┌", "┐", "─"
@@ -181,7 +184,8 @@ class DisplayManager:
                 pad_right = max(0, inner_width - len(title) - pad_left)
                 self.console.print(f"{tl}{h * pad_left}{title}{h * pad_right}{tr}")
             else:
-                self._tmux_box_width = None
+                # Header without borders
+                self.console.print(f"--- Assistant ({model_name}) ---")
 
     def _emit_tmux_wrapped_lines(self, text: str):
         if text is None:
@@ -230,23 +234,56 @@ class DisplayManager:
         if self._stream_mode == "normal":
             if not self._live:
                 return
-            self._live.update(self.create_live_display(
-                "".join(buffers.get("reasoning_parts", [])) if buffers else None,
-                {"content": "".join(buffers.get("assistant_text_parts", [])) if buffers else "", "tool_calls": list((buffers.get("tool_calls_buf") or {}).values())}
-            ), refresh=True)
+            # Build a stable panel that includes content + tool calls preview
+            assistant_buf = {
+                "content": "".join(buffers.get("assistant_text_parts", [])) if buffers else "",
+                "tool_calls": list((buffers.get("tool_calls_buf") or {}).values())
+            }
+            self._live.update(self.create_live_display("".join(buffers.get("reasoning_parts", [])) if buffers else None, assistant_buf), refresh=True)
         elif self._stream_mode == "tmux":
             if content:
                 self._emit_tmux_wrapped_lines(content)
+            # Show tool calls headers as they accumulate
+            if buffers and buffers.get("tool_calls_buf"):
+                # Render a simple tool calls section once per update
+                tc_list = list(buffers["tool_calls_buf"].values())
+                # Print tool call titles and arguments in a readable form
+                # We won't reflow previous; we append as visible updates
+                for tc in tc_list:
+                    func = tc.get("function", {})
+                    name = func.get("name", "")
+                    args_str = func.get("arguments", "")
+                    if not args_str:
+                        continue
+                    # Emit a simple labeled line
+                    self._emit_tmux_wrapped_lines(f"\n[Tool Call] {name}\n")
+                    # If it's bash/python, try to show script body plainly
+                    try:
+                        import json as _json
+                        parsed = _json.loads(args_str)
+                        script = parsed.get("script", "")
+                        if script:
+                            for line in script.splitlines():
+                                self._emit_tmux_wrapped_lines(line + "\n")
+                        else:
+                            self._emit_tmux_wrapped_lines(args_str + "\n")
+                    except Exception:
+                        self._emit_tmux_wrapped_lines(args_str + "\n")
 
     def end_stream(self, final_assistant_msg: Dict):
         mode = self._stream_mode
         self._stream_mode = None
         if mode == "normal":
+            # Close Live first to avoid redraw conflicts, then print final once
             if self._live:
-                self._live.update(self._create_assistant_panel(final_assistant_msg, live_model_name=self.client.current_model_key), refresh=True)
-                self._live.__exit__(None, None, None)
+                try:
+                    self._live.__exit__(None, None, None)
+                except Exception:
+                    pass
                 self._live = None
+            self.console.print(self._create_assistant_panel(final_assistant_msg, live_model_name=self.client.current_model_key))
         elif mode == "tmux":
+            # Flush any remaining buffered text as final lines
             if self._tmux_line_buf:
                 width = (self._tmux_box_width - 2) if (self._tmux_box_width and self.client.borders_enabled) else None
                 def emit_line(line: str):
@@ -272,8 +309,10 @@ class DisplayManager:
                     emit_line(line)
                 self._tmux_line_buf = ""
                 self._stream_started = True
+            # Draw bottom border only if we drew a header and content started
             if self.client.borders_enabled and self._tmux_box_width and self._stream_started:
-                if self.client.boxStyle is box.ROUNDED:
+                from rich import box as _box
+                if self.client.boxStyle is _box.ROUNDED:
                     bl, br, h = "╰", "╯", "─"
                 else:
                     bl, br, h = "└", "┘", "─"
@@ -283,6 +322,17 @@ class DisplayManager:
     def create_live_display(self, reasoning: Optional[str], assistant_msg: Dict) -> Group:
         renderables = []
         
+        # Always show a header even without borders in normal mode live
+        header_text = f"Assistant ({self.client.current_model_key})"
+        if self.client.borders_enabled:
+            renderables.append(Panel(
+                Text(header_text),
+                border_style="cyan",
+                box=self.client.boxStyle
+            ))
+        else:
+            renderables.append(Text(f"--- {header_text} ---"))
+
         if self.client.show_thinking and reasoning:
             renderables.append(Panel(
                 Text(reasoning, justify="left", no_wrap=False, overflow="fold"),
@@ -291,15 +341,59 @@ class DisplayManager:
                 box=self.client.boxStyle
             ))
 
-        has_assistant_content = assistant_msg.get("content") or assistant_msg.get("tool_calls")
+        content = assistant_msg.get("content") or ""
+        tool_calls = assistant_msg.get("tool_calls") or []
 
-        if not renderables and not has_assistant_content:
+        if content or tool_calls:
+            # Build assistant block with content and tool call previews
+            sub_renders = []
+            if content:
+                sub_renders.append(Text(content, justify="left", no_wrap=False, overflow="fold"))
+            if tool_calls:
+                from rich.syntax import Syntax
+                for tc in tool_calls:
+                    func = tc.get("function", {})
+                    name = func.get("name", "")
+                    args_str = func.get("arguments", "")
+                    title = f"[bold yellow]Tool Call: {name}[/bold yellow]" if name else "[bold yellow]Tool Call[/bold yellow]"
+                    # Try to show code for bash/python
+                    try:
+                        import json as _json
+                        parsed = _json.loads(args_str or "{}")
+                        script = parsed.get("script", "")
+                        if script and name in ["bash", "python"]:
+                            lang = "bash" if name == "bash" else "python"
+                            sub_renders.append(Panel(
+                                Syntax(script, lang, theme="monokai", line_numbers=self.client.borders_enabled, word_wrap=True),
+                                title=title,
+                                border_style="yellow",
+                                box=self.client.boxStyle
+                            ))
+                        else:
+                            sub_renders.append(Panel(
+                                Text(args_str or "{}", no_wrap=False, overflow="fold"),
+                                title=title,
+                                border_style="yellow",
+                                box=self.client.boxStyle
+                            ))
+                    except Exception:
+                        sub_renders.append(Panel(
+                            Text(args_str or "{}", no_wrap=False, overflow="fold"),
+                            title=title,
+                            border_style="yellow",
+                            box=self.client.boxStyle
+                        ))
+            if sub_renders:
+                renderables.append(Panel(
+                    Group(*sub_renders),
+                    border_style="cyan" if self.client.borders_enabled else "none",
+                    box=self.client.boxStyle
+                ))
+        else:
             renderables.append(Panel(
                 "[dim]Assistant is thinking...[/dim]",
                 border_style="cyan" if self.client.borders_enabled else "none",
                 box=self.client.boxStyle
             ))
-        else:
-            renderables.append(self._create_assistant_panel(assistant_msg, live_model_name=self.client.current_model_key))
-        
+
         return Group(*renderables)
