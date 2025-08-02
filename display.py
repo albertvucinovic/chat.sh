@@ -17,6 +17,7 @@ class DisplayManager:
         self._live = None
         self._stream_started = False
         self._tmux_box_width = None
+        self._tmux_line_buf: str = ""
 
     def get_border_style(self, style: str) -> str:
         return style if self.client.borders_enabled else "none"
@@ -158,41 +159,69 @@ class DisplayManager:
     def begin_stream(self, model_name: str, mode: str):
         self._stream_mode = mode
         self._stream_started = False
+        self._tmux_line_buf = ""
         if mode == "normal":
             from rich.live import Live
             self._live = Live(console=self.console, auto_refresh=False, vertical_overflow="visible")
             self._live.__enter__()
             self._live.update(self.create_live_display(None, {}), refresh=True)
         elif mode == "tmux":
-            # Initialize simple boxed streaming if borders enabled
             if self.client.borders_enabled:
                 width = shutil.get_terminal_size((80, 20)).columns
-                # Keep a small margin and ensure minimum
                 self._tmux_box_width = max(20, width - 2)
-                # Top border with rounded or minimal corners depending on boxStyle
-                tl, tr, h = "╭", "╮", "─" if self.client.boxStyle is box.ROUNDED else ("┌", "┐", "─")
+                if self.client.boxStyle is box.ROUNDED:
+                    tl, tr, h = "╭", "╮", "─"
+                else:
+                    tl, tr, h = "┌", "┐", "─"
                 self.console.print(f"{tl}{h * (self._tmux_box_width - 2)}{tr}")
             else:
                 self._tmux_box_width = None
 
-    def _tmux_stream_print_lines(self, text: str):
-        # Hard-wrap text to box width, prefix with side borders if enabled
-        if not text:
+    def _emit_tmux_wrapped_lines(self, text: str):
+        if text is None:
             return
-        lines = text.splitlines(True)  # keepends
-        for chunk in lines:
-            for line in chunk.splitlines(False):
-                if self._tmux_box_width and self.client.borders_enabled:
-                    avail = self._tmux_box_width - 2
-                    while line:
-                        part, line = line[:avail], line[avail:]
-                        self.console.print(f"│{part.ljust(avail)}│")
+        self._tmux_line_buf += text
+        width = (self._tmux_box_width - 2) if (self._tmux_box_width and self.client.borders_enabled) else None
+
+        def emit_line(line: str):
+            if self._tmux_box_width and self.client.borders_enabled:
+                avail = self._tmux_box_width - 2
+                self.console.print(f"│{line.ljust(avail)}│")
+            else:
+                self.console.print(line)
+
+        while True:
+            if "\n" in self._tmux_line_buf:
+                line, self._tmux_line_buf = self._tmux_line_buf.split("\n", 1)
+                # Wrap long line at word boundaries
+                if width:
+                    start = 0
+                    while start < len(line):
+                        segment = line[start: start + width + 1]
+                        if len(segment) <= width:
+                            emit_line(segment)
+                            break
+                        # Find last whitespace within width
+                        cut = segment.rfind(" ", 0, width)
+                        if cut == -1:
+                            cut = width
+                        emit_line(segment[:cut])
+                        start += cut
                 else:
-                    self.console.print(line)
-            if chunk.endswith("\n") and not self._tmux_box_width:
-                # already printed newline in console.print(line)
-                pass
-        self._stream_started = True
+                    emit_line(line)
+                self._stream_started = True
+            else:
+                # No newline present; if buffer too long, emit wrapped prefix
+                if width and len(self._tmux_line_buf) > width:
+                    segment = self._tmux_line_buf[: width + 1]
+                    cut = segment.rfind(" ", 0, width)
+                    if cut == -1:
+                        cut = width
+                    emit_line(self._tmux_line_buf[:cut])
+                    self._tmux_line_buf = self._tmux_line_buf[cut:]
+                    self._stream_started = True
+                    continue
+                break
 
     def stream_chunk(self, content: Optional[str] = None, reasoning: Optional[str] = None, tool_calls_delta: Optional[Dict] = None, model_name: Optional[str] = None, buffers: Optional[Dict] = None):
         if self._stream_mode == "normal":
@@ -204,7 +233,7 @@ class DisplayManager:
             ), refresh=True)
         elif self._stream_mode == "tmux":
             if content:
-                self._tmux_stream_print_lines(content)
+                self._emit_tmux_wrapped_lines(content)
 
     def end_stream(self, final_assistant_msg: Dict):
         mode = self._stream_mode
@@ -215,11 +244,39 @@ class DisplayManager:
                 self._live.__exit__(None, None, None)
                 self._live = None
         elif mode == "tmux":
+            # Flush any remaining buffer
+            if self._tmux_line_buf:
+                # Emit remaining buffer (no trailing newline)
+                width = (self._tmux_box_width - 2) if (self._tmux_box_width and self.client.borders_enabled) else None
+                def emit_line(line: str):
+                    if self._tmux_box_width and self.client.borders_enabled:
+                        avail = self._tmux_box_width - 2
+                        self.console.print(f"│{line.ljust(avail)}│")
+                    else:
+                        self.console.print(line)
+                line = self._tmux_line_buf
+                if width:
+                    start = 0
+                    while start < len(line):
+                        segment = line[start: start + width + 1]
+                        if len(segment) <= width:
+                            emit_line(segment)
+                            break
+                        cut = segment.rfind(" ", 0, width)
+                        if cut == -1:
+                            cut = width
+                        emit_line(segment[:cut])
+                        start += cut
+                else:
+                    emit_line(line)
+                self._tmux_line_buf = ""
+                self._stream_started = True
             if self.client.borders_enabled and self._tmux_box_width and self._stream_started:
-                # Bottom border
-                bl, br, h = "╰", "╯", "─" if self.client.boxStyle is box.ROUNDED else ("└", "┘", "─")
+                if self.client.boxStyle is box.ROUNDED:
+                    bl, br, h = "╰", "╯", "─"
+                else:
+                    bl, br, h = "└", "┘", "─"
                 self.console.print(f"{bl}{h * (self._tmux_box_width - 2)}{br}")
-            # Reset
             self._tmux_box_width = None
 
     def create_live_display(self, reasoning: Optional[str], assistant_msg: Dict) -> Group:
