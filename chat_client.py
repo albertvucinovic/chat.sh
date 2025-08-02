@@ -40,7 +40,7 @@ class ChatClient:
         return out[::-1]
 
     def __init__(self):
-        # Keep borders visible; avoid Live in tmux for streaming
+        # Keep borders visible; avoid Live repaint loops in tmux by centralizing streaming in DisplayManager
         self.console = Console(force_terminal=True, legacy_windows=False)
         self.display_manager = DisplayManager(self)
         self.headers = {"Content-Type": "application/json"}
@@ -323,75 +323,53 @@ class ChatClient:
             
             assistant_text_parts, reasoning_parts, tool_calls_buf, interrupted = [], [], {}, False
             in_tmux = bool(os.environ.get("TMUX"))
+            # Begin streaming via DisplayManager
+            self.display_manager.begin_stream(self.current_model_key, mode=("tmux" if in_tmux else "normal"))
             try:
-                if in_tmux:
-                    # In tmux: stream safely using raw writes (no Live), then render once
-                    # Emit a small header once to separate outputs without panel borders
-                    self.console.print(f"[dim]Streaming assistant response ({self.current_model_key})...[/dim]")
-                    response = requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": True}, timeout=120, stream=True)
-                    response.raise_for_status()
-
-                    started = False
-                    for line in response.iter_lines():
-                        if not line: continue
-                        line_str = line.decode('utf-8')
-                        if not line_str.startswith("data: "): continue
-                        data_str = line_str[6:]
-                        if data_str == "[DONE]": break
-                        try: delta = json.loads(data_str).get("choices", [{}])[0].get("delta", {})
-                        except (json.JSONDecodeError, IndexError): continue
-
-                        if content := delta.get("content"):
-                            assistant_text_parts.append(content)
-                            # Start with a newline so we don't collide with the prompt
-                            if not started:
-                                sys.stdout.write("\n")
-                                started = True
-                            sys.stdout.write(content)
-                            sys.stdout.flush()
-                        if reason := delta.get("reasoning_content"):
-                            reasoning_parts.append(reason)
-                        if tc_chunk := delta.get("tool_calls"):
-                            for tc_delta in tc_chunk:
-                                idx = tc_delta.get("index")
-                                if idx not in tool_calls_buf: tool_calls_buf[idx] = {"id": f"call_{uuid.uuid4().hex[:10]}", "type": "function", "function": {"name": "", "arguments": ""}}
-                                if tc_delta.get("id"): tool_calls_buf[idx]["id"] = tc_delta["id"]
-                                if f_delta := tc_delta.get("function"):
-                                    if n := f_delta.get("name"): tool_calls_buf[idx]["function"]["name"] += n
-                                    if a := f_delta.get("arguments"): tool_calls_buf[idx]["function"]["arguments"] += a
-                else:
-                    with Live(console=self.console, auto_refresh=False, vertical_overflow="visible") as live:
-                        live.update(self.display_manager.create_live_display(None, {}), refresh=True)
-                        response = requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": True}, timeout=120, stream=True)
-                        response.raise_for_status()
-                        
-                        for line in response.iter_lines():
-                            if not line: continue
-                            line_str = line.decode('utf-8')
-                            if not line_str.startswith("data: "): continue
-                            data_str = line_str[6:]
-                            if data_str == "[DONE]": break
-                            try: delta = json.loads(data_str).get("choices", [{}])[0].get("delta", {})
-                            except (json.JSONDecodeError, IndexError): continue
-                            
-                            if content := delta.get("content"): assistant_text_parts.append(content)
-                            if reason := delta.get("reasoning_content"): reasoning_parts.append(reason)
-                            if tc_chunk := delta.get("tool_calls"):
-                                for tc_delta in tc_chunk:
-                                    idx = tc_delta.get("index")
-                                    if idx not in tool_calls_buf: tool_calls_buf[idx] = {"id": f"call_{uuid.uuid4().hex[:10]}", "type": "function", "function": {"name": "", "arguments": ""}}
-                                    if tc_delta.get("id"): tool_calls_buf[idx]["id"] = tc_delta["id"]
-                                    if f_delta := tc_delta.get("function"):
-                                        if n := f_delta.get("name"): tool_calls_buf[idx]["function"]["name"] += n
-                                        if a := f_delta.get("arguments"): tool_calls_buf[idx]["function"]["arguments"] += a
-                            
-                            live.update(self.display_manager.create_live_display(
-                                "".join(reasoning_parts),
-                                {"content": "".join(assistant_text_parts), "tool_calls": list(tool_calls_buf.values())}
-                            ), refresh=True)
+                response = requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": True}, timeout=120, stream=True)
+                response.raise_for_status()
+                
+                for line in response.iter_lines():
+                    if not line: continue
+                    line_str = line.decode('utf-8')
+                    if not line_str.startswith("data: "): continue
+                    data_str = line_str[6:]
+                    if data_str == "[DONE]": break
+                    try: delta = json.loads(data_str).get("choices", [{}])[0].get("delta", {})
+                    except (json.JSONDecodeError, IndexError): continue
+                    
+                    if content := delta.get("content"): assistant_text_parts.append(content)
+                    if reason := delta.get("reasoning_content"): reasoning_parts.append(reason)
+                    if tc_chunk := delta.get("tool_calls"):
+                        for tc_delta in tc_chunk:
+                            idx = tc_delta.get("index")
+                            if idx not in tool_calls_buf:
+                                tool_calls_buf[idx] = {"id": f"call_{uuid.uuid4().hex[:10]}", "type": "function", "function": {"name": "", "arguments": ""}}
+                            if tc_delta.get("id"): tool_calls_buf[idx]["id"] = tc_delta["id"]
+                            if f_delta := tc_delta.get("function"):
+                                if n := f_delta.get("name"): tool_calls_buf[idx]["function"]["name"] += n
+                                if a := f_delta.get("arguments"): tool_calls_buf[idx]["function"]["arguments"] += a
+                    
+                    # Update display per delta
+                    self.display_manager.stream_chunk(
+                        content=delta.get("content"),
+                        reasoning=delta.get("reasoning_content"),
+                        tool_calls_delta=delta.get("tool_calls"),
+                        model_name=self.current_model_key,
+                        buffers={
+                            "assistant_text_parts": assistant_text_parts,
+                            "reasoning_parts": reasoning_parts,
+                            "tool_calls_buf": tool_calls_buf,
+                        }
+                    )
 
             except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
                 self.console.print(f"\n[bold red]Error: {e}[/bold red]" if not isinstance(e, KeyboardInterrupt) else "\n[bold yellow]Interrupted.[/bold yellow]")
+                # Ensure we close any active streaming display
+                try:
+                    self.display_manager.end_stream({"role": "assistant", "content": "".join(assistant_text_parts), "tool_calls": list(tool_calls_buf.values())})
+                except Exception:
+                    pass
                 if isinstance(e, KeyboardInterrupt): return
             
             complete_message = "".join(assistant_text_parts)
@@ -413,11 +391,8 @@ class ChatClient:
             if assistant_msg.get("content"): self.short_recap = self.extract_short_recap(assistant_msg.get("content"))
             self.messages.append(assistant_msg)
 
-            # After stream completes, render once as a Panel for nice history
-            try:
-                self.display_manager.render_message(assistant_msg)
-            except Exception:
-                pass
+            # End streaming cleanly (normal mode closes Live; tmux prints a rule only)
+            self.display_manager.end_stream(assistant_msg)
             
             if tool_calls := assistant_msg.get("tool_calls"):
                 for tc in tool_calls: tool_manager.handle_tool_call(self, tc, display_call=should_redisplay)
