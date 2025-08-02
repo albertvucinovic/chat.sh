@@ -395,6 +395,7 @@ class ChatClient:
             self.display_manager.end_stream(assistant_msg)
             
             if tool_calls := assistant_msg.get("tool_calls"):
+                # In tmux mode we already streamed tool deltas; avoid extra display prints
                 display_calls = should_redisplay and (self.display_manager._stream_mode != "tmux")
                 for tc in tool_calls: tool_manager.handle_tool_call(self, tc, display_call=display_calls)
                 continue

@@ -18,6 +18,9 @@ class DisplayManager:
         self._stream_started = False
         self._tmux_box_width = None
         self._tmux_line_buf: str = ""
+        # Track incremental progress for tool call streaming in tmux
+        # Per tool-call index: {"name_len": int, "args_len": int, "printed_header": int}
+        self._tmux_toolcall_progress: Dict[int, Dict[str, int]] = {}
 
     def get_border_style(self, style: str) -> str:
         return style if self.client.borders_enabled else "none"
@@ -160,6 +163,7 @@ class DisplayManager:
         self._stream_mode = mode
         self._stream_started = False
         self._tmux_line_buf = ""
+        self._tmux_toolcall_progress = {}
         if mode == "normal":
             from rich.live import Live
             self._live = Live(console=self.console, auto_refresh=False, vertical_overflow="visible")
@@ -230,6 +234,31 @@ class DisplayManager:
                     continue
                 break
 
+    def _emit_tmux_tool_delta(self, idx: int, name: str, args_str: str):
+        # Maintain name and args streaming positions and header printing per tool-call index
+        prog = self._tmux_toolcall_progress.setdefault(idx, {"name_len": 0, "args_len": 0, "printed_header": 0})
+
+        # Name delta streaming
+        if name:
+            new_name_part = name[prog["name_len"]:]
+            if new_name_part:
+                if not prog["printed_header"]:
+                    self._emit_tmux_wrapped_lines(f"\n[Tool Call] ")
+                    prog["printed_header"] = 1
+                self._emit_tmux_wrapped_lines(new_name_part)
+                prog["name_len"] = len(name)
+
+        # Arguments delta streaming with natural wrapping (no word-per-line)
+        if args_str:
+            if prog["args_len"] == 0:
+                # First time we see args for this tool call, separate with a newline
+                self._emit_tmux_wrapped_lines("\n")
+            new_args_part = args_str[prog["args_len"]:]
+            if new_args_part:
+                # Stream the new chunk as-is; wrapping handled in _emit_tmux_wrapped_lines
+                self._emit_tmux_wrapped_lines(new_args_part)
+                prog["args_len"] = len(args_str)
+
     def stream_chunk(self, content: Optional[str] = None, reasoning: Optional[str] = None, tool_calls_delta: Optional[Dict] = None, model_name: Optional[str] = None, buffers: Optional[Dict] = None):
         if self._stream_mode == "normal":
             if not self._live:
@@ -243,32 +272,13 @@ class DisplayManager:
         elif self._stream_mode == "tmux":
             if content:
                 self._emit_tmux_wrapped_lines(content)
-            # Show tool calls headers as they accumulate
+            # Incremental tool call streaming
             if buffers and buffers.get("tool_calls_buf"):
-                # Render a simple tool calls section once per update
-                tc_list = list(buffers["tool_calls_buf"].values())
-                # Print tool call titles and arguments in a readable form
-                # We won't reflow previous; we append as visible updates
-                for tc in tc_list:
+                for idx, tc in (buffers["tool_calls_buf"].items() if isinstance(buffers["tool_calls_buf"], dict) else enumerate(buffers["tool_calls_buf"])):
                     func = tc.get("function", {})
-                    name = func.get("name", "")
-                    args_str = func.get("arguments", "")
-                    if not args_str:
-                        continue
-                    # Emit a simple labeled line
-                    self._emit_tmux_wrapped_lines(f"\n[Tool Call] {name}\n")
-                    # If it's bash/python, try to show script body plainly
-                    try:
-                        import json as _json
-                        parsed = _json.loads(args_str)
-                        script = parsed.get("script", "")
-                        if script:
-                            for line in script.splitlines():
-                                self._emit_tmux_wrapped_lines(line + "\n")
-                        else:
-                            self._emit_tmux_wrapped_lines(args_str + "\n")
-                    except Exception:
-                        self._emit_tmux_wrapped_lines(args_str + "\n")
+                    name = func.get("name", "") or ""
+                    args_str = func.get("arguments", "") or ""
+                    self._emit_tmux_tool_delta(int(idx), name, args_str)
 
     def end_stream(self, final_assistant_msg: Dict):
         mode = self._stream_mode
@@ -318,6 +328,7 @@ class DisplayManager:
                     bl, br, h = "└", "┘", "─"
                 self.console.print(f"{bl}{h * (self._tmux_box_width - 2)}{br}")
             self._tmux_box_width = None
+            self._tmux_toolcall_progress = {}
 
     def create_live_display(self, reasoning: Optional[str], assistant_msg: Dict) -> Group:
         renderables = []
