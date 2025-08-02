@@ -37,7 +37,7 @@ class DisplayManager:
                 # Get the model from the message, or fall back to the current client model
                 model_name = msg.get("model_key", self.client.current_model_key)
                 title = f"[bold green]You & {model_name}[/bold green]"
-                border_style = "green"
+                border_style = "green" if self.client.borders_enabled else "none"
                 content_renderable = Text(msg.get("content", "") or "[No content]", no_wrap=False, overflow="fold")
                 self.console.print(Panel(content_renderable, title=title, border_style=border_style, box=self.client.boxStyle), crop=False)
 
@@ -46,10 +46,11 @@ class DisplayManager:
 
             elif role == "tool":
                 output_renderable = Text(msg.get("content", "") or "[No output]", no_wrap=False, overflow="fold")
+                border_style = "green" if self.client.borders_enabled else "none"
                 self.console.print(Panel(
                     output_renderable,
                     title=f"[bold green]Tool Output: {msg.get('name', 'N/A')}[/bold green]",
-                    border_style="green",
+                    border_style=border_style,
                     box=self.client.boxStyle
                 ), crop=False)
                 # Special pretty summary for wait_agents
@@ -146,10 +147,11 @@ class DisplayManager:
         if not renderables:
             renderables.append(Text("[No content or tool calls]"))
 
+        border_style = "cyan" if self.client.borders_enabled else "none"
         return Panel(
             Group(*renderables),
             title=title,
-            border_style="cyan",
+            border_style=border_style,
             box=self.client.boxStyle
         )
 
@@ -159,22 +161,21 @@ class DisplayManager:
         self._stream_mode = mode
         self._stream_started = False
         if mode == "normal":
-            # Delay Live creation; create on first update to show placeholder
             from rich.live import Live
             self._live = Live(console=self.console, auto_refresh=False, vertical_overflow="visible")
             self._live.__enter__()
             self._live.update(self.create_live_display(None, {}), refresh=True)
         elif mode == "tmux":
-            # Print a fixed top border header once; no reflow later
-            header = Panel("Streaming...", title=f"[bold cyan]Assistant ({model_name})[/bold cyan]", border_style="cyan", box=self.client.boxStyle)
-            self.console.print(header)
+            # Print a fixed top border header once if borders are enabled; otherwise, nothing
+            if self.client.borders_enabled:
+                header = Panel("Streaming...", title=f"[bold cyan]Assistant ({model_name})[/bold cyan]", border_style="cyan", box=self.client.boxStyle)
+                self.console.print(header)
             # Prepare a subtle prefix for stream lines
             self.console.print("", end="")
 
     def stream_chunk(self, content: Optional[str] = None, reasoning: Optional[str] = None, tool_calls_delta: Optional[Dict] = None, model_name: Optional[str] = None, buffers: Optional[Dict] = None):
         """Feed a streaming delta. For normal mode, re-render Live; for tmux, append-only raw write."""
         if self._stream_mode == "normal":
-            # Expect buffers to contain 'assistant_text_parts', 'reasoning_parts', and 'tool_calls_buf'
             if not self._live:
                 return
             self._live.update(self.create_live_display(
@@ -183,21 +184,18 @@ class DisplayManager:
             ), refresh=True)
         elif self._stream_mode == "tmux":
             if content:
-                # Start with a newline once to avoid colliding with prompt
                 if not self._stream_started:
                     self.console.print("")
                     self._stream_started = True
-                # Append chunk without reflow; use stdout to minimize interference
                 try:
                     import sys as _sys
                     _sys.stdout.write(content)
                     _sys.stdout.flush()
                 except Exception:
-                    # Fallback
                     self.console.print(content)
 
     def end_stream(self, final_assistant_msg: Dict):
-        """Finish streaming. Close Live if used; in tmux, print a closing border or nothing to avoid duplication."""
+        """Finish streaming. Close Live if used; in tmux, optionally print a closing border."""
         mode = self._stream_mode
         self._stream_mode = None
         if mode == "normal":
@@ -207,11 +205,18 @@ class DisplayManager:
                 self._live.__exit__(None, None, None)
                 self._live = None
         elif mode == "tmux":
-            # Do NOT re-render panel to avoid duplication; optionally print a thin rule
-            try:
-                self.console.rule(style=self.get_border_style("cyan"))
-            except Exception:
-                pass
+            if self.client.borders_enabled and self._stream_started:
+                # Ensure a newline before footer to avoid sticking to last line
+                try:
+                    import sys as _sys
+                    _sys.stdout.write("\n")
+                    _sys.stdout.flush()
+                except Exception:
+                    self.console.print("")
+                try:
+                    self.console.rule(style=self.get_border_style("cyan"))
+                except Exception:
+                    pass
 
     def create_live_display(self, reasoning: Optional[str], assistant_msg: Dict) -> Group:
         """Creates the renderable Group for the Live display during streaming."""
@@ -232,15 +237,12 @@ class DisplayManager:
         # 3. If there's no reasoning and no assistant content, show a single placeholder.
         #    Otherwise, show the normal assistant panel.
         if not renderables and not has_assistant_content:
-            # The entire display is empty, so show a placeholder.
             renderables.append(Panel(
                 "[dim]Assistant is thinking...[/dim]",
-                border_style="cyan",
+                border_style="cyan" if self.client.borders_enabled else "none",
                 box=self.client.boxStyle
             ))
         else:
-            # There's either reasoning or assistant content, so show the assistant panel.
-            # Pass the current model name for live display.
             renderables.append(self._create_assistant_panel(assistant_msg, live_model_name=self.client.current_model_key))
         
         return Group(*renderables)
