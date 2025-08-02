@@ -1,4 +1,5 @@
 import json
+import shutil
 from typing import Dict, List, Optional
 
 from rich import box
@@ -15,6 +16,7 @@ class DisplayManager:
         self._stream_mode: Optional[str] = None  # "normal" | "tmux" | None
         self._live = None
         self._stream_started = False
+        self._tmux_box_width = None
 
     def get_border_style(self, style: str) -> str:
         return style if self.client.borders_enabled else "none"
@@ -34,7 +36,6 @@ class DisplayManager:
         try:
             role = msg.get("role")
             if role == "user":
-                # Get the model from the message, or fall back to the current client model
                 model_name = msg.get("model_key", self.client.current_model_key)
                 title = f"[bold green]You & {model_name}[/bold green]"
                 border_style = "green" if self.client.borders_enabled else "none"
@@ -111,12 +112,10 @@ class DisplayManager:
             self.console.print(f"[red]Error rendering message: {e}[/red]")
 
     def _create_assistant_panel(self, msg: Dict, live_model_name: Optional[str] = None) -> Panel:
-        """Creates a rich Panel for an assistant message, including tool calls."""
         content = msg.get("content", "")
         tool_calls = msg.get("tool_calls", [])
         renderables = []
 
-        # For live streaming, use the provided name. For loaded chats, get it from the message.
         model_name = live_model_name or msg.get("model_key", self.client.current_model_key)
         title = f"[bold cyan]Assistant ({model_name})[/bold cyan]"
 
@@ -157,7 +156,6 @@ class DisplayManager:
 
     # Streaming API centralization
     def begin_stream(self, model_name: str, mode: str):
-        """Start streaming in the selected mode: 'normal' uses Live; 'tmux' uses simple borders."""
         self._stream_mode = mode
         self._stream_started = False
         if mode == "normal":
@@ -166,15 +164,37 @@ class DisplayManager:
             self._live.__enter__()
             self._live.update(self.create_live_display(None, {}), refresh=True)
         elif mode == "tmux":
-            # Print a fixed top border header once if borders are enabled; otherwise, nothing
+            # Initialize simple boxed streaming if borders enabled
             if self.client.borders_enabled:
-                header = Panel("Streaming...", title=f"[bold cyan]Assistant ({model_name})[/bold cyan]", border_style="cyan", box=self.client.boxStyle)
-                self.console.print(header)
-            # Prepare a subtle prefix for stream lines
-            self.console.print("", end="")
+                width = shutil.get_terminal_size((80, 20)).columns
+                # Keep a small margin and ensure minimum
+                self._tmux_box_width = max(20, width - 2)
+                # Top border with rounded or minimal corners depending on boxStyle
+                tl, tr, h = "╭", "╮", "─" if self.client.boxStyle is box.ROUNDED else ("┌", "┐", "─")
+                self.console.print(f"{tl}{h * (self._tmux_box_width - 2)}{tr}")
+            else:
+                self._tmux_box_width = None
+
+    def _tmux_stream_print_lines(self, text: str):
+        # Hard-wrap text to box width, prefix with side borders if enabled
+        if not text:
+            return
+        lines = text.splitlines(True)  # keepends
+        for chunk in lines:
+            for line in chunk.splitlines(False):
+                if self._tmux_box_width and self.client.borders_enabled:
+                    avail = self._tmux_box_width - 2
+                    while line:
+                        part, line = line[:avail], line[avail:]
+                        self.console.print(f"│{part.ljust(avail)}│")
+                else:
+                    self.console.print(line)
+            if chunk.endswith("\n") and not self._tmux_box_width:
+                # already printed newline in console.print(line)
+                pass
+        self._stream_started = True
 
     def stream_chunk(self, content: Optional[str] = None, reasoning: Optional[str] = None, tool_calls_delta: Optional[Dict] = None, model_name: Optional[str] = None, buffers: Optional[Dict] = None):
-        """Feed a streaming delta. For normal mode, re-render Live; for tmux, append-only raw write."""
         if self._stream_mode == "normal":
             if not self._live:
                 return
@@ -184,45 +204,27 @@ class DisplayManager:
             ), refresh=True)
         elif self._stream_mode == "tmux":
             if content:
-                if not self._stream_started:
-                    self.console.print("")
-                    self._stream_started = True
-                try:
-                    import sys as _sys
-                    _sys.stdout.write(content)
-                    _sys.stdout.flush()
-                except Exception:
-                    self.console.print(content)
+                self._tmux_stream_print_lines(content)
 
     def end_stream(self, final_assistant_msg: Dict):
-        """Finish streaming. Close Live if used; in tmux, optionally print a closing border."""
         mode = self._stream_mode
         self._stream_mode = None
         if mode == "normal":
             if self._live:
-                # Final re-render with completed content
                 self._live.update(self._create_assistant_panel(final_assistant_msg, live_model_name=self.client.current_model_key), refresh=True)
                 self._live.__exit__(None, None, None)
                 self._live = None
         elif mode == "tmux":
-            if self.client.borders_enabled and self._stream_started:
-                # Ensure a newline before footer to avoid sticking to last line
-                try:
-                    import sys as _sys
-                    _sys.stdout.write("\n")
-                    _sys.stdout.flush()
-                except Exception:
-                    self.console.print("")
-                try:
-                    self.console.rule(style=self.get_border_style("cyan"))
-                except Exception:
-                    pass
+            if self.client.borders_enabled and self._tmux_box_width and self._stream_started:
+                # Bottom border
+                bl, br, h = "╰", "╯", "─" if self.client.boxStyle is box.ROUNDED else ("└", "┘", "─")
+                self.console.print(f"{bl}{h * (self._tmux_box_width - 2)}{br}")
+            # Reset
+            self._tmux_box_width = None
 
     def create_live_display(self, reasoning: Optional[str], assistant_msg: Dict) -> Group:
-        """Creates the renderable Group for the Live display during streaming."""
         renderables = []
         
-        # 1. Add the Reasoning panel only if it has content and the setting is enabled.
         if self.client.show_thinking and reasoning:
             renderables.append(Panel(
                 Text(reasoning, justify="left", no_wrap=False, overflow="fold"),
@@ -231,11 +233,8 @@ class DisplayManager:
                 box=self.client.boxStyle
             ))
 
-        # 2. Determine if the main assistant response has any content yet.
         has_assistant_content = assistant_msg.get("content") or assistant_msg.get("tool_calls")
 
-        # 3. If there's no reasoning and no assistant content, show a single placeholder.
-        #    Otherwise, show the normal assistant panel.
         if not renderables and not has_assistant_content:
             renderables.append(Panel(
                 "[dim]Assistant is thinking...[/dim]",
