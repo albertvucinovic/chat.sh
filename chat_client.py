@@ -40,7 +40,7 @@ class ChatClient:
         return out[::-1]
 
     def __init__(self):
-        self.console = Console(force_terminal=True, legacy_windows=False)
+        self.console = Console()
         self.display_manager = DisplayManager(self)
         self.headers = {"Content-Type": "application/json"}
         # Start with borders disabled by default

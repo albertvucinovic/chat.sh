@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CALLER_CWD="$(pwd)"
 
 # Parse optional CLI flags: --tree <id>, --inline
 TREE_CLI=""
@@ -39,16 +40,16 @@ set -a
 source "$SCRIPT_DIR/.env"
 set +a
 
-# Write current tree marker and ensure dirs
-mkdir -p "$SCRIPT_DIR/.egg/agents"
-echo "$TREE_ID" > "$SCRIPT_DIR/.egg/agents/.current_tree"
-mkdir -p "$SCRIPT_DIR/.egg/agents/$TREE_ID/root"
+# Write current tree marker and ensure dirs in caller's directory
+mkdir -p "$CALLER_CWD/.egg/agents"
+echo "$TREE_ID" > "$CALLER_CWD/.egg/agents/.current_tree"
+mkdir -p "$CALLER_CWD/.egg/agents/$TREE_ID/root"
 
 SESSION="egg-tree-$TREE_ID"
 
 if [[ $RUN_INLINE -eq 1 ]]; then
-  # Explicit inline run (used for spawned children)
-  python "$SCRIPT_DIR/chat.py" "$@"
+  # Explicit inline run (used for spawned children) from caller’s directory
+  (cd "$CALLER_CWD" && python "$SCRIPT_DIR/chat.py" "$@")
   deactivate
   exit 0
 fi
@@ -58,7 +59,7 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux new-session -d -s "$SESSION" 'bash'
   tmux rename-window -t "$SESSION":0 root
   tmux send-keys -t "$SESSION":root \
-    "cd '$SCRIPT_DIR' && source venv/bin/activate && set -a && source .env && set +a && EG_TREE_ID='$TREE_ID' bash -lc 'python chat.py'" C-m
+    "cd '$CALLER_CWD' && source '$SCRIPT_DIR/venv/bin/activate' && set -a && source '$SCRIPT_DIR/.env' && set +a && EG_TREE_ID='$TREE_ID' bash -lc 'python \"$SCRIPT_DIR/chat.py\"'" C-m
 fi
 
 # Announce target session

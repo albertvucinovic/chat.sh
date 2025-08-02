@@ -4,6 +4,21 @@
        "model_name": "openrouter/horizon-alpha",
        "max_tokens": 250000
    },
+   "Cypher Alpha": {
+       "provider": "openrouter",
+       "model_name": "openrouter/cypher-alpha",
+       "max_tokens": 1000000
+   },
+   "Optimus Alpha": {
+       "provider": "openrouter",
+       "model_name": "openrouter/optimus-alpha",
+       "max_tokens": 1000000
+   },
+   "Quasar Alpha": {
+       "provider": "openrouter",
+       "model_name": "openrouter/quasar-alpha",
+       "max_tokens": 1000000
+   },
    "Qwen3 Coder OR": {
        "provider": "openrouter",
        "model_name": "qwen/qwen3-coder:free",

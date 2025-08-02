@@ -31,6 +31,9 @@ TOOLS = [
 ]
 
 
+AGENTS_BASE = Path.cwd() / '.egg' / 'agents'
+
+
 def _tmux_raw(cmd: str) -> str:
     try:
         res = subprocess.run(cmd, shell=True, executable="/bin/bash", capture_output=True, text=True, timeout=10)
@@ -95,7 +98,7 @@ def _active_pane_in_window_id(window_id: str) -> str:
 
 
 def _read_parent_pane_id(tree_id: str, parent_id: str) -> str:
-    p = Path('.egg/agents') / tree_id / parent_id / 'state.json'
+    p = AGENTS_BASE / tree_id / parent_id / 'state.json'
     st = _read_json(p)
     if isinstance(st, dict):
         pid = st.get('pane_id')
@@ -105,21 +108,21 @@ def _read_parent_pane_id(tree_id: str, parent_id: str) -> str:
 
 
 def _write_parent_right_column_pane(tree_id: str, parent_id: str, right_pane_id: str):
-    p = Path('.egg/agents') / tree_id / parent_id / 'state.json'
+    p = AGENTS_BASE / tree_id / parent_id / 'state.json'
     st = _read_json(p) or {}
     st['right_column_pane_id'] = right_pane_id
     _write_json(p, st)
 
 
 def _read_parent_right_column_pane(tree_id: str, parent_id: str) -> str:
-    p = Path('.egg/agents') / tree_id / parent_id / 'state.json'
+    p = AGENTS_BASE / tree_id / parent_id / 'state.json'
     st = _read_json(p) or {}
     v = st.get('right_column_pane_id')
     return v if isinstance(v, str) else ""
 
 
 def _write_child_pane_id(tree_id: str, parent_id: str, child_id: str, pane_id: str):
-    p = Path('.egg/agents') / tree_id / parent_id / 'children' / child_id / 'state.json'
+    p = AGENTS_BASE / tree_id / parent_id / 'children' / child_id / 'state.json'
     st = _read_json(p) or {}
     st['pane_id'] = pane_id
     _write_json(p, st)
@@ -216,7 +219,7 @@ def tool_spawn_agent(args: Dict) -> str:
 
     tree_id = os.environ.get('EG_TREE_ID')
     if not tree_id:
-        current = Path('.egg/agents/.current_tree')
+        current = AGENTS_BASE / '.current_tree'
         if current.exists():
             try:
                 tree_id = current.read_text().strip()
@@ -224,13 +227,13 @@ def tool_spawn_agent(args: Dict) -> str:
                 tree_id = None
     if not tree_id:
         tree_id = str(int(time.time()))
-        Path('.egg/agents').mkdir(parents=True, exist_ok=True)
-        Path('.egg/agents/.current_tree').write_text(tree_id)
+        (AGENTS_BASE).mkdir(parents=True, exist_ok=True)
+        (AGENTS_BASE / '.current_tree').write_text(tree_id)
 
     parent_id = os.environ.get('EG_AGENT_ID', 'root')
     parent_cwd = str(Path.cwd())
 
-    base_dir = Path('.egg/agents') / tree_id / parent_id / 'children'
+    base_dir = AGENTS_BASE / tree_id / parent_id / 'children'
     base_dir.mkdir(parents=True, exist_ok=True)
     child_id = _next_child_id(base_dir, label)
     child_dir = base_dir / child_id
@@ -272,7 +275,7 @@ def tool_wait_agents(args: Dict) -> str:
     tree_id = os.environ.get('EG_TREE_ID')
     if not tree_id:
         try:
-            tree_id = Path('.egg/agents/.current_tree').read_text().strip()
+            tree_id = (AGENTS_BASE / '.current_tree').read_text().strip()
         except Exception:
             tree_id = None
     if not tree_id:
@@ -363,7 +366,7 @@ def tool_write_result(args: Dict) -> str:
 
 
 def _list_all_children_dirs(tree_id: str) -> List[Tuple[str, Path]]:
-    base = Path('.egg/agents') / tree_id
+    base = AGENTS_BASE / tree_id
     out: List[Tuple[str, Path]] = []
     if not base.exists():
         return out
@@ -484,13 +487,13 @@ def tool_list_agents(args: Dict) -> str:
     tree_id = args.get('tree_id') or os.environ.get('EG_TREE_ID')
     if not tree_id:
         try:
-            tree_id = Path('.egg/agents/.current_tree').read_text().strip()
+            tree_id = (AGENTS_BASE / '.current_tree').read_text().strip()
         except Exception:
             tree_id = None
     if not tree_id:
         return json.dumps({"error": "No tree context found"})
     listing: Dict[str, List[Dict[str, Any]]] = {}
-    base = Path('.egg/agents') / tree_id
+    base = AGENTS_BASE / tree_id
     if not base.exists():
         return json.dumps({"tree_id": tree_id, "parents": listing}, indent=2)
     for parent_dir in base.iterdir():
@@ -525,7 +528,7 @@ def tool_spawn_agent_auto(args: Dict) -> str:
 
     tree_id = os.environ.get('EG_TREE_ID')
     if not tree_id:
-        current = Path('.egg/agents/.current_tree')
+        current = AGENTS_BASE / '.current_tree'
         if current.exists():
             try:
                 tree_id = current.read_text().strip()
@@ -533,13 +536,13 @@ def tool_spawn_agent_auto(args: Dict) -> str:
                 tree_id = None
     if not tree_id:
         tree_id = str(int(time.time()))
-        Path('.egg/agents').mkdir(parents=True, exist_ok=True)
-        Path('.egg/agents/.current_tree').write_text(tree_id)
+        (AGENTS_BASE).mkdir(parents=True, exist_ok=True)
+        (AGENTS_BASE / '.current_tree').write_text(tree_id)
 
     parent_id = os.environ.get('EG_AGENT_ID', 'root')
     parent_cwd = str(Path.cwd())
 
-    base_dir = Path('.egg/agents') / tree_id / parent_id / 'children'
+    base_dir = AGENTS_BASE / tree_id / parent_id / 'children'
     base_dir.mkdir(parents=True, exist_ok=True)
     child_id = _next_child_id(base_dir, label)
     child_dir = base_dir / child_id
