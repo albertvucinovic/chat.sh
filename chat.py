@@ -455,7 +455,9 @@ def main():
                     continue
                 elif len(parts) >= 2:
                     tree_id = parts[1]
-                    script = f"script/agents/attach_agent.sh {tree_id}"
+                    script_dir = os.path.dirname(os.path.realpath(__file__))
+                    script_path = os.path.join(script_dir, 'script', 'agents', 'attach_agent.sh')
+                    script = f"'{script_path}' {tree_id}"
                     output = run_bash_script(script)
                     if 'no server running' in output.lower() or 'no sessions' in output.lower():
                         console.print(Panel("Session not found. Tree reconstruction is not yet implemented in this step.", title="[bold yellow]/o attach[/bold yellow]", border_style="yellow", box=client.boxStyle))
@@ -530,7 +532,9 @@ def main():
                 else:
                     tree_id = parts[1]
                     agent_id = parts[2] if len(parts) > 2 else ''
-                script = f"script/agents/attach_agent.sh {tree_id} {agent_id}"
+                script_dir = os.path.dirname(os.path.realpath(__file__))
+                script_path = os.path.join(script_dir, 'script', 'agents', 'attach_agent.sh')
+                script = f"'{script_path}' {tree_id} {agent_id}" if agent_id else f"'{script_path}' {tree_id}"
                 output = run_bash_script(script)
                 console.print(Panel(Text(output), title="[bold cyan]tmux attach[/bold cyan]", border_style="cyan", box=client.boxStyle))
                 continue
