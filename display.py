@@ -155,6 +155,8 @@ class DisplayManager:
         self._tmux_box_width: Optional[int] = None
         self._tmux_sessions: "OrderedDict[str, BoxSession]" = OrderedDict()
         self._tmux_active_id: Optional[str] = None
+        # Display preference: show unescaped tool args for readability
+        self.unescape_tool_display: bool = True
 
     def get_border_style(self, style: str) -> str:
         return style if self.client.borders_enabled else "none"
@@ -168,6 +170,22 @@ class DisplayManager:
                 box=self.client.boxStyle
             )
         )
+
+    # Helper: unescape based on tool name for display only
+    def _unescape_for_tool(self, name: str, s: str) -> str:
+        if not s:
+            return s or ""
+        out = s
+        # Always map common escapes
+        out = out.replace("\\n", "\n").replace("\\t", "\t")
+        n = (name or "").lower()
+        if n == "bash":
+            out = out.replace("\\$", "$").replace("\\`", "`")
+            # Light backslash reduction (avoid touching \n/\t already handled)
+            out = out.replace("\\\\", "\\")
+        elif n == "python":
+            out = out.replace('\\"', '"').replace("\\'", "'")
+        return out
 
     def render_message(self, msg: Dict, is_loading: bool = False) -> None:
         try:
@@ -257,7 +275,7 @@ class DisplayManager:
             for tc in tool_calls:
                 func = tc.get("function", {})
                 name, args_str = func.get("name", "..."), func.get("arguments", "")
-                # Pretty if valid JSON & script; else show raw partial args during streaming
+                # Pretty if valid JSON & script; else show raw/optionally-unescaped args
                 script = None
                 try:
                     parsed = json.loads(args_str or '{}')
@@ -274,7 +292,9 @@ class DisplayManager:
                         box=self.client.boxStyle
                     ))
                 else:
-                    pretty = (args_str or "").replace("\\n", "\n")
+                    pretty = args_str or ""
+                    if self.unescape_tool_display:
+                        pretty = self._unescape_for_tool(name, pretty)
                     renderables.append(Panel(
                         Text(pretty, no_wrap=False, overflow="fold"),
                         title=f"[bold yellow]Tool Call: {name}[/bold yellow]",
@@ -359,8 +379,10 @@ class DisplayManager:
                     sess = self._ensure_session(sid, title)
                     if not sess.box.started and name:
                         sess.box.title = title
-                    # Convert literal \n to real newlines for display
-                    display_args = args_str.replace("\\n", "\n")
+                    # Prepare display version based on toggle and tool type
+                    display_args = args_str
+                    if self.unescape_tool_display:
+                        display_args = self._unescape_for_tool(name, args_str)
                     if len(display_args) >= sess.consumed_len:
                         sess.append_cumulative(display_args)
                     else:
@@ -434,10 +456,14 @@ class DisplayManager:
                             lang = "bash" if name == "bash" else "python"
                             sub_renders.append(Panel(Syntax(script, lang, theme="monokai", line_numbers=self.client.borders_enabled, word_wrap=True), title=title, border_style="yellow", box=self.client.boxStyle))
                         else:
-                            pretty = (args_str or "{}").replace("\\n", "\n")
+                            pretty = args_str or "{}"
+                            if self.unescape_tool_display:
+                                pretty = self._unescape_for_tool(name, pretty)
                             sub_renders.append(Panel(Text(pretty, no_wrap=False, overflow="fold"), title=title, border_style="yellow", box=self.client.boxStyle))
                     except Exception:
-                        pretty = (args_str or "{}").replace("\\n", "\n")
+                        pretty = args_str or "{}"
+                        if self.unescape_tool_display:
+                            pretty = self._unescape_for_tool(name, pretty)
                         sub_renders.append(Panel(Text(pretty, no_wrap=False, overflow="fold"), title=title, border_style="yellow", box=self.client.boxStyle))
             if sub_renders:
                 renderables.append(Panel(Group(*sub_renders), border_style="cyan" if self.client.borders_enabled else "none", box=self.client.boxStyle))
