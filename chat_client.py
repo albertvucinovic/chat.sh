@@ -297,17 +297,22 @@ class ChatClient:
         self.console.print(f"[bold green]Switched to model: '{self.current_model_key}'[/bold green]")
 
     def _sanitize_messages_for_api(self, messages: List[Dict]) -> List[Dict]:
-        """Removes any non-standard keys from messages before sending to the API."""
+        """Prepare messages for provider: remove unsupported keys and exclude local-only tool outputs."""
         sanitized_messages = []
-        keys_to_remove = {"reasoning_content", "model_key"} 
+        keys_to_remove = {"reasoning_content", "model_key", "local_tool"}
         for msg in messages:
-            if isinstance(msg, dict):
-                sanitized_msg = {key: value for key, value in msg.items() if key not in keys_to_remove}
-                if sanitized_msg.get("content") is None and "tool_calls" not in sanitized_msg:
-                     sanitized_msg["content"] = ""
-                if sanitized_msg.get("role") == "assistant" and "tool_calls" in sanitized_msg and not sanitized_msg["tool_calls"]:
-                    del sanitized_msg["tool_calls"]
-                sanitized_messages.append(sanitized_msg)
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role")
+            # Exclude tool messages that were marked as local-only (from user-initiated commands)
+            if role == "tool" and msg.get("local_tool"):
+                continue
+            sanitized_msg = {key: value for key, value in msg.items() if key not in keys_to_remove}
+            if sanitized_msg.get("content") is None and "tool_calls" not in sanitized_msg:
+                sanitized_msg["content"] = ""
+            if sanitized_msg.get("role") == "assistant" and "tool_calls" in sanitized_msg and not sanitized_msg["tool_calls"]:
+                del sanitized_msg["tool_calls"]
+            sanitized_messages.append(sanitized_msg)
         return sanitized_messages
 
     def send_message(self, message: str):
@@ -326,7 +331,8 @@ class ChatClient:
             # Begin streaming via DisplayManager
             self.display_manager.begin_stream(self.current_model_key, mode=("tmux" if in_tmux else "normal"))
             try:
-                response = requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": True}, timeout=120, stream=True)
+                payload = {"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": True}
+                response = requests.post(f"{self.base_url}", headers=self.headers, json=payload, timeout=120, stream=True)
                 response.raise_for_status()
                 
                 for line in response.iter_lines():
@@ -409,7 +415,8 @@ class ChatClient:
         messages_for_api = self._sanitize_messages_for_api(self.messages)
         
         try:
-            requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": messages_for_api, "stream": False, "max_tokens": 1}, timeout=30).raise_for_status()
+            # Send minimal tokens to nudge context only
+            requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": False, "max_tokens": 1}, timeout=30).raise_for_status()
         except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
             self.console.print(f"\n[bold red]Error: Failed to send context to LLM: {e}[/bold red]")
             self.messages.pop()

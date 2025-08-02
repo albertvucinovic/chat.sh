@@ -299,7 +299,20 @@ def main():
                     from tool_manager import tool_spawn_agent
                     result_json = tool_spawn_agent({"context_text": context_text, "label": label})
                     console.print(Panel(Text(result_json), title="[bold green]Spawned Agent[/bold green]", border_style="green", box=client.boxStyle))
-                    client.messages.append({"role": "tool", "name": "spawn_agent", "tool_call_id": f"local_{label}", "content": result_json})
+                    # Mark as local tool so it's not sent to the LLM
+                    client.messages.append({"role": "tool", "name": "spawn_agent", "tool_call_id": f"local_{label}", "content": result_json, "local_tool": True})
+                    # Descriptive user context and context-only send
+                    try:
+                        info = json.loads(result_json)
+                        desc = f"User issued /spawn. Outcome: Spawned child {info.get('child_id','')} in tree {info.get('tree_id','')}"
+                    except Exception:
+                        desc = "User issued /spawn. Outcome: Spawned child agent."
+                    client.messages.append({"role": "user", "content": desc})
+                    client.send_context_only(desc)
+                    # Local assistant acknowledgment for UX
+                    ack_msg = {"role": "assistant", "content": desc, "model_key": client.current_model_key}
+                    client.messages.append(ack_msg)
+                    client.display_manager.render_message(ack_msg)
                 except Exception as e:
                     console.print(Panel(f"Spawn failed: {e}", title="[bold red]Spawn Error[/bold red]", border_style="red", box=client.boxStyle))
                 continue
@@ -378,7 +391,20 @@ def main():
                     from tool_manager import tool_spawn_agent_auto
                     result_json = tool_spawn_agent_auto({"context_text": context_text, "label": label})
                     console.print(Panel(Text(result_json), title="[bold green]Spawned Agent (auto)[/bold green]", border_style="green", box=client.boxStyle))
-                    client.messages.append({"role": "tool", "name": "spawn_agent_auto", "tool_call_id": f"local_{label}_auto", "content": result_json})
+                    # Mark as local tool so it's not sent to the LLM
+                    client.messages.append({"role": "tool", "name": "spawn_agent_auto", "tool_call_id": f"local_{label}_auto", "content": result_json, "local_tool": True})
+                    # Descriptive user context and context-only send
+                    try:
+                        info = json.loads(result_json)
+                        desc = f"User issued /spawn_auto. Outcome: Spawned child {info.get('child_id','')} in tree {info.get('tree_id','')} (auto)"
+                    except Exception:
+                        desc = "User issued /spawn_auto. Outcome: Spawned child agent (auto)."
+                    client.messages.append({"role": "user", "content": desc})
+                    client.send_context_only(desc)
+                    # Local assistant acknowledgment for UX
+                    ack_msg = {"role": "assistant", "content": desc, "model_key": client.current_model_key}
+                    client.messages.append(ack_msg)
+                    client.display_manager.render_message(ack_msg)
                 except Exception as e:
                     console.print(Panel(f"Spawn failed: {e}", title="[bold red]Spawn Error[/bold red]", border_style="red", box=client.boxStyle))
                 continue
@@ -405,12 +431,18 @@ def main():
                     from tool_manager import tool_wait_agents
                     result_json = tool_wait_agents(args_obj)
                     console.print(Panel(Text(result_json), title="[bold green]Wait Agents[/bold green]", border_style="green", box=client.boxStyle))
-                    client.messages.append({"role": "tool", "name": "wait_agents", "tool_call_id": f"local_wait", "content": result_json})
+                    # Mark as local tool so it's not sent to the LLM
+                    client.messages.append({"role": "tool", "name": "wait_agents", "tool_call_id": f"local_wait", "content": result_json, "local_tool": True})
+                    # Context-only description
+                    client.messages.append({"role": "user", "content": f"User issued /wait: {json.dumps(args_obj)}"})
+                    client.send_context_only(f"User issued /wait: {json.dumps(args_obj)}")
                 except KeyboardInterrupt:
                     # Gracefully handle Ctrl+C to cancel wait without exiting the app
                     result_json = json.dumps({"interrupted": True, "message": "wait interrupted by user"}, indent=2)
                     console.print(Panel(Text(result_json), title="[bold yellow]Wait Interrupted[/bold yellow]", border_style="yellow", box=client.boxStyle))
-                    client.messages.append({"role": "tool", "name": "wait_agents", "tool_call_id": f"local_wait", "content": result_json})
+                    client.messages.append({"role": "tool", "name": "wait_agents", "tool_call_id": f"local_wait", "content": result_json, "local_tool": True})
+                    client.messages.append({"role": "user", "content": "User cancelled /wait."})
+                    client.send_context_only("User cancelled /wait.")
                 except Exception:
                     # Fallback to model tool call
                     args = json.dumps(args_obj)
