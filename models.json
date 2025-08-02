@@ -1,4 +1,9 @@
 {
+   "Horizon Beta": {
+       "provider": "openrouter",
+       "model_name": "openrouter/horizon-beta",
+       "max_tokens": 250000
+   },
    "Horizon Alpha": {
        "provider": "openrouter",
        "model_name": "openrouter/horizon-alpha",
