@@ -203,29 +203,60 @@ class DisplayManager:
         def is_code_like(val: str) -> bool:
             if not isinstance(val, str):
                 return False
-            if "\n" in val:
+            s = val.strip()
+            if "\n" in s:
                 return True
-            if val.strip().startswith("```"):
+            if s.startswith("```") and s.endswith("```"):
                 return True
-            # simple heuristics
-            candidates = ["def ", "#!/", "#!/usr", "{", "}", ";", "$(", "function "]
-            return any(tok in val for tok in candidates)
+            # heuristics for code-ish content
+            code_tokens = [
+                "def ", "class ", "import ", "#!/", "#!/usr",
+                "$(", ";", "{", "}", " then", " fi", " do", " done",
+            ]
+            return any(tok in s for tok in code_tokens)
 
         def language_for(name_: str, key: str, val: str) -> str:
-            if name_.lower() in ("bash", "sh"):
+            tool = (name_ or "").lower()
+            k = (key or "").lower()
+            s = (val or "").strip()
+            # direct tool mapping
+            if tool in ("bash", "sh"):
                 return "bash"
-            if name_.lower() in ("python",):
+            if tool in ("python",):
                 return "python"
-            # Guess from key
-            if key.lower() in ("script", "bash", "shell"):
+            # key-based mapping
+            if k in ("script", "bash", "shell", "cmd", "command"):
+                # decide between bash or python by content
+                if "def " in s or "import " in s or s.startswith("#!/usr/bin/env python"):
+                    return "python"
                 return "bash"
-            if key.lower() in ("py", "python_code"):
+            if k in ("py", "python_code", "code_py"):
                 return "python"
-            return "text"
+            if k in ("json", "payload", "body"):
+                # might be JSON
+                try:
+                    json.loads(s)
+                    return "json"
+                except Exception:
+                    pass
+            # content-based hints
+            try:
+                obj = json.loads(s)
+                if isinstance(obj, (dict, list)):
+                    return "json"
+            except Exception:
+                pass
+            if s.startswith("<?xml") or s.startswith("<") and s.endswith(">"):
+                return "xml"
+            if s.startswith("{") and s.endswith("}"):
+                return "json"
+            # default
+            return "bash" if any(tok in s for tok in ["#!/", "$(", ";"]) else "python" if any(tok in s for tok in ["def ", "import "]) else "text"
 
         if parsed is None or not isinstance(parsed, dict):
             # Fallback: show raw string
-            renderables.append(Panel(Text(args_str or "{}", no_wrap=False, overflow="fold"), title=title, border_style="yellow", box=self.client.boxStyle))
+            s = args_str or "{}"
+            renderables.append(Panel(Text(s, no_wrap=False, overflow="fold"), title=title, border_style="yellow", box=self.client.boxStyle))
             return renderables
 
         # Build per-field panels, code fields nicely syntax-highlighted
@@ -236,7 +267,14 @@ class DisplayManager:
                 if lang == "text":
                     sub_renders.append(Panel(Text(v, no_wrap=False, overflow="fold"), title=f"[bold]{k}[/bold]", border_style="yellow", box=self.client.boxStyle))
                 else:
-                    sub_renders.append(Panel(Syntax(v, lang, theme="monokai", line_numbers=self.client.borders_enabled, word_wrap=True), title=f"[bold]{k}[/bold]", border_style="yellow", box=self.client.boxStyle))
+                    # Strip code fences for better highlighting if present
+                    code = v
+                    if code.strip().startswith("```") and code.strip().endswith("```"):
+                        inner = code.strip().strip("`")
+                        # naive fence removal: ```lang\n...```
+                        parts = inner.split("\n", 1)
+                        code = parts[1] if len(parts) == 2 else parts[0]
+                    sub_renders.append(Panel(Syntax(code, lang, theme="monokai", line_numbers=self.client.borders_enabled, word_wrap=True), title=f"[bold]{k}[/bold]", border_style="yellow", box=self.client.boxStyle))
             else:
                 # Pretty-print non-code JSON values
                 try:
