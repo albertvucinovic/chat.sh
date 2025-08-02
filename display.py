@@ -288,6 +288,20 @@ class DisplayManager:
         renderables.append(Panel(Group(*sub_renders), title=title, border_style="yellow", box=self.client.boxStyle))
         return renderables
 
+    def _render_pretty_tool_calls_only(self, tool_calls: List[Dict]):
+        if not tool_calls:
+            return
+        # Build pretty panels only for tool calls
+        sub_panels: List[Any] = []
+        for tc in tool_calls:
+            func = tc.get("function", {})
+            name = func.get("name", "...")
+            args_str = func.get("arguments", "")
+            sub_panels.extend(self._build_pretty_tool_call_renderables(name, args_str))
+        if sub_panels:
+            border_style = "cyan" if self.client.borders_enabled else "none"
+            self.console.print(Panel(Group(*sub_panels), border_style=border_style, box=self.client.boxStyle))
+
     def render_message(self, msg: Dict, is_loading: bool = False) -> None:
         try:
             role = msg.get("role")
@@ -519,9 +533,9 @@ class DisplayManager:
                 except Exception:
                     pass
                 self._live = None
-            # Final pretty-printed panel for tool calls
-            pretty_msg = dict(final_assistant_msg)
-            self.console.print(self._create_assistant_panel(pretty_msg, live_model_name=self.client.current_model_key, pretty_tool_calls=True))
+            # Print only pretty-printed tool call panels, do not redraw content
+            tool_calls = final_assistant_msg.get("tool_calls") or []
+            self._render_pretty_tool_calls_only(tool_calls)
         elif mode == "tmux":
             # Close all tmux raw panes first
             if self._tmux_active_id is not None:
@@ -534,9 +548,9 @@ class DisplayManager:
                     sess.close()
             self._tmux_sessions.clear()
             self._tmux_box_width = None
-            # Immediately show pretty-printed final assistant panel (after raw panes close)
-            pretty_msg = dict(final_assistant_msg)
-            self.console.print(self._create_assistant_panel(pretty_msg, live_model_name=self.client.current_model_key, pretty_tool_calls=True))
+            # Print only pretty-printed tool call panels, do not redraw content
+            tool_calls = final_assistant_msg.get("tool_calls") or []
+            self._render_pretty_tool_calls_only(tool_calls)
 
     def create_live_display(self, reasoning: Optional[str], assistant_msg: Dict) -> Group:
         renderables = []
