@@ -21,6 +21,8 @@ class DisplayManager:
         # Track incremental progress for tool call streaming in tmux
         # Per tool-call index: {"name_len": int, "args_len": int, "printed_header": int}
         self._tmux_toolcall_progress: Dict[int, Dict[str, int]] = {}
+        # Reasoning streaming flag for tmux
+        self._tmux_reasoning_started: bool = False
 
     def get_border_style(self, style: str) -> str:
         return style if self.client.borders_enabled else "none"
@@ -164,6 +166,7 @@ class DisplayManager:
         self._stream_started = False
         self._tmux_line_buf = ""
         self._tmux_toolcall_progress = {}
+        self._tmux_reasoning_started = False
         if mode == "normal":
             from rich.live import Live
             self._live = Live(console=self.console, auto_refresh=False, vertical_overflow="visible")
@@ -259,6 +262,15 @@ class DisplayManager:
                 self._emit_tmux_wrapped_lines(new_args_part)
                 prog["args_len"] = len(args_str)
 
+    def _emit_tmux_reasoning(self, text: str):
+        if not text:
+            return
+        if not self._tmux_reasoning_started:
+            # Print a header once per stream for reasoning
+            self._emit_tmux_wrapped_lines("\n[Reasoning] ")
+            self._tmux_reasoning_started = True
+        self._emit_tmux_wrapped_lines(text)
+
     def stream_chunk(self, content: Optional[str] = None, reasoning: Optional[str] = None, tool_calls_delta: Optional[Dict] = None, model_name: Optional[str] = None, buffers: Optional[Dict] = None):
         if self._stream_mode == "normal":
             if not self._live:
@@ -270,6 +282,10 @@ class DisplayManager:
             }
             self._live.update(self.create_live_display("".join(buffers.get("reasoning_parts", [])) if buffers else None, assistant_buf), refresh=True)
         elif self._stream_mode == "tmux":
+            # Reasoning first (if enabled)
+            if self.client.show_thinking and reasoning:
+                self._emit_tmux_reasoning(reasoning)
+            # Then content
             if content:
                 self._emit_tmux_wrapped_lines(content)
             # Incremental tool call streaming
@@ -329,6 +345,7 @@ class DisplayManager:
                 self.console.print(f"{bl}{h * (self._tmux_box_width - 2)}{br}")
             self._tmux_box_width = None
             self._tmux_toolcall_progress = {}
+            self._tmux_reasoning_started = False
 
     def create_live_display(self, reasoning: Optional[str], assistant_msg: Dict) -> Group:
         renderables = []
