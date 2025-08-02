@@ -123,7 +123,8 @@ def main():
             "[bold]/wait <child_id|space-separated list>|any|all[/bold] - Wait for specific child agents, any, or all.\n"
             "[bold]/tree[/bold] - List children in current tree.  [bold]/attach <tree_id?> [agent_id?][/bold] - Attach tmux.\n"
             "[bold]/tree use <tree_id>[/bold] - Switch active agent tree for this session.  [bold]/tree list[/bold] - List existing trees.\n"
-            "[bold]/o <tree_id>|list[/bold] - Attach to a tree's tmux session (list to show trees).\n",
+            "[bold]/o <tree_id>|list[/bold] - Attach to a tree's tmux session (list to show trees).\n"
+            "[bold]/toggleEscape[/bold] - Toggle display of tool call arguments between escaped and unescaped.",
             title="[bold]Welcome[/bold]",
             border_style=client.get_border_style("magenta")
         )
@@ -204,6 +205,13 @@ def main():
                 client.messages.append({"role": "user", "content": user_input})
                 model_key = user_input[len("/model"):].strip()
                 client.switch_model(model_key)
+                continue
+
+            elif user_input.startswith("/toggleEscape"):
+                cur = getattr(client.display_manager, "unescape_tool_display", True)
+                client.display_manager.unescape_tool_display = not cur
+                status = "UNESCAPED" if client.display_manager.unescape_tool_display else "ESCAPED"
+                console.print(f"[cyan]Tool argument display is now {status}[/cyan]")
                 continue
 
             elif user_input.startswith("/popContext"):
