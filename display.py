@@ -173,7 +173,13 @@ class DisplayManager:
                     tl, tr, h = "╭", "╮", "─"
                 else:
                     tl, tr, h = "┌", "┐", "─"
-                self.console.print(f"{tl}{h * (self._tmux_box_width - 2)}{tr}")
+                inner_width = self._tmux_box_width - 2
+                title = f" Assistant ({model_name}) "
+                if len(title) > inner_width:
+                    title = title[:max(0, inner_width)]
+                pad_left = max(0, (inner_width - len(title)) // 2)
+                pad_right = max(0, inner_width - len(title) - pad_left)
+                self.console.print(f"{tl}{h * pad_left}{title}{h * pad_right}{tr}")
             else:
                 self._tmux_box_width = None
 
@@ -193,7 +199,6 @@ class DisplayManager:
         while True:
             if "\n" in self._tmux_line_buf:
                 line, self._tmux_line_buf = self._tmux_line_buf.split("\n", 1)
-                # Wrap long line at word boundaries
                 if width:
                     start = 0
                     while start < len(line):
@@ -201,7 +206,6 @@ class DisplayManager:
                         if len(segment) <= width:
                             emit_line(segment)
                             break
-                        # Find last whitespace within width
                         cut = segment.rfind(" ", 0, width)
                         if cut == -1:
                             cut = width
@@ -211,7 +215,6 @@ class DisplayManager:
                     emit_line(line)
                 self._stream_started = True
             else:
-                # No newline present; if buffer too long, emit wrapped prefix
                 if width and len(self._tmux_line_buf) > width:
                     segment = self._tmux_line_buf[: width + 1]
                     cut = segment.rfind(" ", 0, width)
@@ -244,9 +247,7 @@ class DisplayManager:
                 self._live.__exit__(None, None, None)
                 self._live = None
         elif mode == "tmux":
-            # Flush any remaining buffer
             if self._tmux_line_buf:
-                # Emit remaining buffer (no trailing newline)
                 width = (self._tmux_box_width - 2) if (self._tmux_box_width and self.client.borders_enabled) else None
                 def emit_line(line: str):
                     if self._tmux_box_width and self.client.borders_enabled:
