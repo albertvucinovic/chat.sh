@@ -40,6 +40,7 @@ class ChatClient:
         return out[::-1]
 
     def __init__(self):
+        # Let Rich auto-detect terminal capabilities; do NOT force terminal
         self.console = Console()
         self.display_manager = DisplayManager(self)
         self.headers = {"Content-Type": "application/json"}
@@ -67,7 +68,7 @@ class ChatClient:
             pass
         # Also check agent state.json if running as a subagent
         try:
-            agent_dir = os.environ.get("EG_AGENT_DIR")
+            agent_dir = os.environ.get('EG_AGENT_DIR')
             if agent_dir:
                 st_path = Path(agent_dir) / 'state.json'
                 if st_path.exists():
@@ -321,12 +322,15 @@ class ChatClient:
             messages_for_api = self._sanitize_messages_for_api(self.messages)
             
             assistant_text_parts, reasoning_parts, tool_calls_buf, interrupted = [], [], {}, False
+            in_tmux = bool(os.environ.get("TMUX"))
             try:
-                with Live(console=self.console, auto_refresh=False, vertical_overflow="visible") as live:
-                    live.update(self.display_manager.create_live_display(None, {}), refresh=True)
+                if in_tmux:
+                    # Simple streaming in tmux: avoid Live and avoid Panels while streaming
+                    # Print a small header once to separate responses
+                    self.console.print(Panel("Streaming response...", title=f"[bold cyan]Assistant ({self.current_model_key})[/bold cyan]", border_style="cyan", box=self.boxStyle))
                     response = requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": True}, timeout=120, stream=True)
                     response.raise_for_status()
-                    
+
                     for line in response.iter_lines():
                         if not line: continue
                         line_str = line.decode('utf-8')
@@ -335,9 +339,17 @@ class ChatClient:
                         if data_str == "[DONE]": break
                         try: delta = json.loads(data_str).get("choices", [{}])[0].get("delta", {})
                         except (json.JSONDecodeError, IndexError): continue
-                        
-                        if content := delta.get("content"): assistant_text_parts.append(content)
-                        if reason := delta.get("reasoning_content"): reasoning_parts.append(reason)
+
+                        if content := delta.get("content"):
+                            assistant_text_parts.append(content)
+                            # Write raw content without rewrapping/panels
+                            try:
+                                self.console.print(content, end="")
+                            except TypeError:
+                                # Older Rich may not support end=; fallback
+                                self.console.print(content)
+                        if reason := delta.get("reasoning_content"):
+                            reasoning_parts.append(reason)
                         if tc_chunk := delta.get("tool_calls"):
                             for tc_delta in tc_chunk:
                                 idx = tc_delta.get("index")
@@ -346,11 +358,36 @@ class ChatClient:
                                 if f_delta := tc_delta.get("function"):
                                     if n := f_delta.get("name"): tool_calls_buf[idx]["function"]["name"] += n
                                     if a := f_delta.get("arguments"): tool_calls_buf[idx]["function"]["arguments"] += a
+                else:
+                    with Live(console=self.console, auto_refresh=False, vertical_overflow="visible") as live:
+                        live.update(self.display_manager.create_live_display(None, {}), refresh=True)
+                        response = requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": True}, timeout=120, stream=True)
+                        response.raise_for_status()
                         
-                        live.update(self.display_manager.create_live_display(
-                            "".join(reasoning_parts),
-                            {"content": "".join(assistant_text_parts), "tool_calls": list(tool_calls_buf.values())}
-                        ), refresh=True)
+                        for line in response.iter_lines():
+                            if not line: continue
+                            line_str = line.decode('utf-8')
+                            if not line_str.startswith("data: "): continue
+                            data_str = line_str[6:]
+                            if data_str == "[DONE]": break
+                            try: delta = json.loads(data_str).get("choices", [{}])[0].get("delta", {})
+                            except (json.JSONDecodeError, IndexError): continue
+                            
+                            if content := delta.get("content"): assistant_text_parts.append(content)
+                            if reason := delta.get("reasoning_content"): reasoning_parts.append(reason)
+                            if tc_chunk := delta.get("tool_calls"):
+                                for tc_delta in tc_chunk:
+                                    idx = tc_delta.get("index")
+                                    if idx not in tool_calls_buf: tool_calls_buf[idx] = {"id": f"call_{uuid.uuid4().hex[:10]}", "type": "function", "function": {"name": "", "arguments": ""}}
+                                    if tc_delta.get("id"): tool_calls_buf[idx]["id"] = tc_delta["id"]
+                                    if f_delta := tc_delta.get("function"):
+                                        if n := f_delta.get("name"): tool_calls_buf[idx]["function"]["name"] += n
+                                        if a := f_delta.get("arguments"): tool_calls_buf[idx]["function"]["arguments"] += a
+                            
+                            live.update(self.display_manager.create_live_display(
+                                "".join(reasoning_parts),
+                                {"content": "".join(assistant_text_parts), "tool_calls": list(tool_calls_buf.values())}
+                            ), refresh=True)
 
             except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
                 self.console.print(f"\n[bold red]Error: {e}[/bold red]" if not isinstance(e, KeyboardInterrupt) else "\n[bold yellow]Interrupted.[/bold yellow]")
