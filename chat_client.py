@@ -407,19 +407,33 @@ class ChatClient:
                 continue
             break
 
-    def send_context_only(self, message: str):
-        self.messages.append({"role": "user", "content": message})
+    def send_context_only(self, context_message: str):
+        """Send context to the model without changing turn or local transcript duplication.
+        Does NOT append the context_message to self.messages. Builds a one-off payload.
+        """
         api_model_name = self.models_config.get(self.current_model_key, {}).get("model_name")
-        if not api_model_name: self.console.print("[bold red]API model name not found.[/bold red]"); return
-        
-        messages_for_api = self._sanitize_messages_for_api(self.messages)
-        
+        if not api_model_name:
+            self.console.print("[bold red]API model name not found.[/bold red]")
+            return
+        # Build provider payload from sanitized history, then append a one-off user message
+        base_messages = self._sanitize_messages_for_api(self.messages)
+        one_off = base_messages + [{"role": "user", "content": context_message}]
         try:
-            # Send minimal tokens to nudge context only
-            requests.post(f"{self.base_url}", headers=self.headers, json={"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": False, "max_tokens": 1}, timeout=30).raise_for_status()
+            requests.post(
+                f"{self.base_url}",
+                headers=self.headers,
+                json={
+                    "model": api_model_name,
+                    "messages": one_off,
+                    "tools": self.tools,
+                    "tool_choice": "auto",
+                    "stream": False,
+                    "max_tokens": 1
+                },
+                timeout=30
+            ).raise_for_status()
         except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
             self.console.print(f"\n[bold red]Error: Failed to send context to LLM: {e}[/bold red]")
-            self.messages.pop()
 
     def toggle_borders(self) -> str:
         self.borders_enabled = not self.borders_enabled

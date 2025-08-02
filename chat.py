@@ -176,12 +176,11 @@ def main():
                 continue
 
             elif user_input.startswith("b "):
-                client.messages.append({"role": "user", "content": user_input})
+                # Do NOT add raw command to transcript; just run locally and send context-only
                 console.print("\n[cyan]Executing local command...[/cyan]")
                 script_to_run = user_input[2:].strip()
                 if script_to_run:
                     output = run_bash_script(script_to_run)
-                    # Render a header even without borders
                     header = f"Local Command Output"
                     if client.borders_enabled:
                         output_renderable = Text(output)
@@ -194,10 +193,11 @@ def main():
                         f"Command:\n```bash\n{script_to_run}\n```\n\n"
                         f"Output:\n---\n{output}\n---"
                     )
+                    # Send to model without advancing the turn, and add durable breadcrumb
                     client.send_context_only(context_message)
+                    client.messages.append({"role": "user", "content": context_message})
                 else:
                     console.print("[yellow]Empty bash command, skipping.[/yellow]")
-                continue
                 continue
 
             elif user_input.startswith("/model"):
@@ -226,9 +226,7 @@ def main():
                 continue
 
             elif user_input.startswith("/spawn"):
-                # Always handle /spawn locally. Do not fallback to model tool-call on errors.
-                client.messages.append({"role": "user", "content": user_input})
-                # Robust parsing: consider quoted first arg as potential file; otherwise treat all as text
+                # Handle locally; do NOT add raw command to transcript
                 rest = user_input[len("/spawn"):].strip()
                 file_path = None
                 additional_text = ""
@@ -246,7 +244,6 @@ def main():
                         parts2 = rest.split(None, 1)
                         candidate = parts2[0]
                         tail = parts2[1] if len(parts2) > 1 else ""
-                    # Validate candidate as an existing .md path
                     resolved_fp = None
                     if candidate.lower().endswith('.md'):
                         try:
@@ -263,14 +260,12 @@ def main():
                         except Exception:
                             resolved_fp = None
                     if resolved_fp is None:
-                        # Treat everything as additional text
                         file_path = None
                         additional_text = rest
                 context_parts = []
                 label = None
                 if file_path:
                     try:
-                        # At this point, resolved_fp must exist
                         if file_path.startswith('global/'):
                             script_dir = os.path.dirname(os.path.realpath(__file__))
                             resolved_fp = os.path.join(script_dir, 'global_commands', file_path[len('global/'):])
@@ -284,7 +279,6 @@ def main():
                         continue
                 if additional_text:
                     context_parts.append(additional_text)
-                # Append finishing instruction after content
                 finishing_instruction = "[SYSTEM NOTE] You are a subagent. When you finish your task, you MUST call the /popContext command with a concise return value (e.g., a path to your output or a short summary). Example: /popContext ./output.md"
                 context_parts.append(finishing_instruction)
                 context_text = "\n\n".join(context_parts).strip()
@@ -294,33 +288,25 @@ def main():
                 if not label:
                     label = (additional_text.split()[:1] or ["child"])[0]
 
-                # Always use local tool spawn; on error, report and continue without involving model
                 try:
                     from tool_manager import tool_spawn_agent
                     result_json = tool_spawn_agent({"context_text": context_text, "label": label})
                     console.print(Panel(Text(result_json), title="[bold green]Spawned Agent[/bold green]", border_style="green", box=client.boxStyle))
-                    # Mark as local tool so it's not sent to the LLM
                     client.messages.append({"role": "tool", "name": "spawn_agent", "tool_call_id": f"local_{label}", "content": result_json, "local_tool": True})
-                    # Descriptive user context and context-only send
                     try:
                         info = json.loads(result_json)
-                        desc = f"User issued /spawn. Outcome: Spawned child {info.get('child_id','')} in tree {info.get('tree_id','')}"
+                        desc = f"[Local Action] Spawned child {info.get('child_id','')} in tree {info.get('tree_id','')}"
                     except Exception:
-                        desc = "User issued /spawn. Outcome: Spawned child agent."
-                    client.messages.append({"role": "user", "content": desc})
+                        desc = "[Local Action] Spawned child agent."
+                    # Inform model without advancing turn and add durable breadcrumb
                     client.send_context_only(desc)
-                    # Local assistant acknowledgment for UX
-                    ack_msg = {"role": "assistant", "content": desc, "model_key": client.current_model_key}
-                    client.messages.append(ack_msg)
-                    client.display_manager.render_message(ack_msg)
+                    client.messages.append({"role": "user", "content": desc})
                 except Exception as e:
                     console.print(Panel(f"Spawn failed: {e}", title="[bold red]Spawn Error[/bold red]", border_style="red", box=client.boxStyle))
                 continue
 
             elif user_input.startswith("/spawn_auto"):
-                # Always handle /spawn_auto locally. Do not fallback to model tool-call on errors.
-                client.messages.append({"role": "user", "content": user_input})
-                # Robust parsing: consider quoted first arg as potential file; otherwise treat all as text
+                # Handle locally; do NOT add raw command to transcript
                 rest = user_input[len("/spawn_auto"):].strip()
                 file_path = None
                 additional_text = ""
@@ -338,7 +324,6 @@ def main():
                         parts2 = rest.split(None, 1)
                         candidate = parts2[0]
                         tail = parts2[1] if len(parts2) > 1 else ""
-                    # Validate candidate as an existing .md path
                     resolved_fp = None
                     if candidate.lower().endswith('.md'):
                         try:
@@ -355,14 +340,12 @@ def main():
                         except Exception:
                             resolved_fp = None
                     if resolved_fp is None:
-                        # Treat everything as additional text
                         file_path = None
                         additional_text = rest
                 context_parts = []
                 label = None
                 if file_path:
                     try:
-                        # At this point, resolved_fp must exist
                         if file_path.startswith('global/'):
                             script_dir = os.path.dirname(os.path.realpath(__file__))
                             resolved_fp = os.path.join(script_dir, 'global_commands', file_path[len('global/'):])
@@ -376,7 +359,6 @@ def main():
                         continue
                 if additional_text:
                     context_parts.append(additional_text)
-                # Append finishing instruction after content
                 finishing_instruction = "[SYSTEM NOTE] You are a subagent. When you finish your task, you MUST call the /popContext command with a concise return value (e.g., a path to your output or a short summary). Example: /popContext ./output.md"
                 context_parts.append(finishing_instruction)
                 context_text = "\n\n".join(context_parts).strip()
@@ -386,32 +368,26 @@ def main():
                 if not label:
                     label = (additional_text.split()[:1] or ["child"])[0]
 
-                # Always use local tool spawn; on error, report and continue without involving model
                 try:
                     from tool_manager import tool_spawn_agent_auto
                     result_json = tool_spawn_agent_auto({"context_text": context_text, "label": label})
                     console.print(Panel(Text(result_json), title="[bold green]Spawned Agent (auto)[/bold green]", border_style="green", box=client.boxStyle))
-                    # Mark as local tool so it's not sent to the LLM
                     client.messages.append({"role": "tool", "name": "spawn_agent_auto", "tool_call_id": f"local_{label}_auto", "content": result_json, "local_tool": True})
-                    # Descriptive user context and context-only send
                     try:
                         info = json.loads(result_json)
-                        desc = f"User issued /spawn_auto. Outcome: Spawned child {info.get('child_id','')} in tree {info.get('tree_id','')} (auto)"
+                        desc = f"[Local Action] Spawned child {info.get('child_id','')} in tree {info.get('tree_id','')} (auto)"
                     except Exception:
-                        desc = "User issued /spawn_auto. Outcome: Spawned child agent (auto)."
-                    client.messages.append({"role": "user", "content": desc})
+                        desc = "[Local Action] Spawned child agent (auto)."
+                    # Inform model without advancing turn and add durable breadcrumb
                     client.send_context_only(desc)
-                    # Local assistant acknowledgment for UX
-                    ack_msg = {"role": "assistant", "content": desc, "model_key": client.current_model_key}
-                    client.messages.append(ack_msg)
-                    client.display_manager.render_message(ack_msg)
+                    client.messages.append({"role": "user", "content": desc})
                 except Exception as e:
                     console.print(Panel(f"Spawn failed: {e}", title="[bold red]Spawn Error[/bold red]", border_style="red", box=client.boxStyle))
                 continue
 
             elif user_input.startswith("/wait"):
+                # Handle locally; do NOT add raw command to transcript
                 rest = user_input[len("/wait"):].strip()
-                client.messages.append({"role": "user", "content": user_input})
                 # Interpret keywords any/all
                 parts = rest.split()
                 args_obj = {}
@@ -421,7 +397,7 @@ def main():
                 if len(parts) == 1 and parts[0].lower() in ("any", "all"):
                     mode = parts[0].lower()
                     if mode == "all":
-                        args_obj = {"which": []}  # interpreted as all current children
+                        args_obj = {"which": []}
                     else:
                         args_obj = {"which": [], "any_mode": True}
                 else:
@@ -431,20 +407,19 @@ def main():
                     from tool_manager import tool_wait_agents
                     result_json = tool_wait_agents(args_obj)
                     console.print(Panel(Text(result_json), title="[bold green]Wait Agents[/bold green]", border_style="green", box=client.boxStyle))
-                    # Mark as local tool so it's not sent to the LLM
                     client.messages.append({"role": "tool", "name": "wait_agents", "tool_call_id": f"local_wait", "content": result_json, "local_tool": True})
-                    # Context-only description
-                    client.messages.append({"role": "user", "content": f"User issued /wait: {json.dumps(args_obj)}"})
-                    client.send_context_only(f"User issued /wait: {json.dumps(args_obj)}")
+                    desc = f"[Local Action] /wait with args: {json.dumps(args_obj)}"
+                    # Inform model without advancing turn and add durable breadcrumb
+                    client.send_context_only(desc)
+                    client.messages.append({"role": "user", "content": desc})
                 except KeyboardInterrupt:
-                    # Gracefully handle Ctrl+C to cancel wait without exiting the app
                     result_json = json.dumps({"interrupted": True, "message": "wait interrupted by user"}, indent=2)
                     console.print(Panel(Text(result_json), title="[bold yellow]Wait Interrupted[/bold yellow]", border_style="yellow", box=client.boxStyle))
                     client.messages.append({"role": "tool", "name": "wait_agents", "tool_call_id": f"local_wait", "content": result_json, "local_tool": True})
-                    client.messages.append({"role": "user", "content": "User cancelled /wait."})
-                    client.send_context_only("User cancelled /wait.")
+                    desc = "[Local Action] /wait cancelled by user"
+                    client.send_context_only(desc)
+                    client.messages.append({"role": "user", "content": desc})
                 except Exception:
-                    # Fallback to model tool call
                     args = json.dumps(args_obj)
                     tool_call_json = json.dumps({
                         "tool_calls": [
@@ -455,6 +430,7 @@ def main():
                 continue
 
             elif user_input.startswith("/o"):
+                # Purely local; do NOT add raw command to transcript
                 parts = user_input.split()
                 base = Path('.egg/agents')
                 if len(parts) == 1 or (len(parts) == 2 and parts[1] == 'list'):
@@ -471,7 +447,6 @@ def main():
                     continue
                 elif len(parts) >= 2:
                     tree_id = parts[1]
-                    # Try to attach existing tmux session for the tree
                     script = f"script/agents/attach_agent.sh {tree_id}"
                     output = run_bash_script(script)
                     if 'no server running' in output.lower() or 'no sessions' in output.lower():
@@ -481,6 +456,7 @@ def main():
                     continue
 
             elif user_input.startswith("/tree "):
+                # Purely local navigation; do NOT add raw command to transcript
                 parts = user_input.split()
                 if len(parts) >= 2 and parts[1] == 'list':
                     base = Path('.egg/agents')
