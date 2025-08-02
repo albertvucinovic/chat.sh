@@ -1,12 +1,134 @@
 import json
-import shutil
 from typing import Dict, List, Optional
 
-from rich import box
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
+
+
+class TmuxBox:
+    """Reusable tmux-like box renderer for streaming text with wrapping.
+
+    Behavior:
+      - Prints a top border/header once when first emitting content.
+      - Streams text with simple wrapping by terminal width, adding side borders when borders are enabled.
+      - Prints a bottom border once when closed and only if content started.
+    """
+    def __init__(self, console: Console, title: str, color: str, borders_enabled: bool, box_style, width_provider):
+        self.console = console
+        self.title = title
+        self.color = color
+        self.borders_enabled = borders_enabled
+        self.box_style = box_style
+        self.width_provider = width_provider  # callable returning full available width (including borders)
+        self.started = False
+        self.closed = False
+        self._line_buf: str = ""
+
+    def _top(self):
+        width = self.width_provider()
+        if not width:
+            # Fallback simple header
+            self.console.print(f"--- {self.title} ---")
+            return
+        if not self.borders_enabled:
+            self.console.print(f"--- {self.title} ---")
+            return
+        # Draw top border with centered title
+        inner_width = max(0, width - 2)
+        title = f" {self.title} "
+        if len(title) > inner_width:
+            title = title[:inner_width]
+        pad_left = max(0, (inner_width - len(title)) // 2)
+        pad_right = max(0, inner_width - len(title) - pad_left)
+        # Use unicode boxes similar to existing logic
+        tl, tr, h = ("╭", "╮", "─") if str(self.box_style).lower().find("rounded") != -1 else ("┌", "┐", "─")
+        self.console.print(f"{tl}{h * pad_left}{title}{h * pad_right}{tr}")
+
+    def _bottom(self):
+        width = self.width_provider()
+        if not width:
+            return
+        if not self.borders_enabled:
+            return
+        bl, br, h = ("╰", "╯", "─") if str(self.box_style).lower().find("rounded") != -1 else ("└", "┘", "─")
+        self.console.print(f"{bl}{h * (max(0, width - 2))}{br}")
+
+    def _emit_line(self, line: str):
+        width = self.width_provider()
+        if self.borders_enabled and width:
+            avail = max(0, width - 2)
+            self.console.print(f"│{line.ljust(avail)}│")
+        else:
+            self.console.print(line)
+
+    def emit(self, text: Optional[str]):
+        if not text:
+            return
+        if self.closed:
+            return
+        if not self.started:
+            self._top()
+            self.started = True
+        self._line_buf += text
+        width = self.width_provider()
+        wrap_width = (width - 2) if (self.borders_enabled and width) else None
+
+        while True:
+            if "\n" in self._line_buf:
+                line, self._line_buf = self._line_buf.split("\n", 1)
+                if wrap_width:
+                    start = 0
+                    while start < len(line):
+                        segment = line[start:start + wrap_width + 1]
+                        if len(segment) <= wrap_width:
+                            self._emit_line(segment)
+                            break
+                        cut = segment.rfind(" ", 0, wrap_width)
+                        if cut == -1:
+                            cut = wrap_width
+                        self._emit_line(segment[:cut])
+                        start += cut
+                else:
+                    self._emit_line(line)
+            else:
+                if wrap_width and len(self._line_buf) > wrap_width:
+                    segment = self._line_buf[:wrap_width + 1]
+                    cut = segment.rfind(" ", 0, wrap_width)
+                    if cut == -1:
+                        cut = wrap_width
+                    self._emit_line(self._line_buf[:cut])
+                    self._line_buf = self._line_buf[cut:]
+                    continue
+                break
+
+    def close(self):
+        if self.closed:
+            return
+        # flush remainder
+        if self._line_buf:
+            line = self._line_buf
+            self._line_buf = ""
+            width = self.width_provider()
+            wrap_width = (width - 2) if (self.borders_enabled and width) else None
+            if wrap_width:
+                start = 0
+                while start < len(line):
+                    segment = line[start:start + wrap_width + 1]
+                    if len(segment) <= wrap_width:
+                        self._emit_line(segment)
+                        break
+                    cut = segment.rfind(" ", 0, wrap_width)
+                    if cut == -1:
+                        cut = wrap_width
+                    self._emit_line(segment[:cut])
+                    start += cut
+            else:
+                self._emit_line(line)
+        if self.started:
+            self._bottom()
+        self.closed = True
 
 
 class DisplayManager:
@@ -15,14 +137,12 @@ class DisplayManager:
         self.console = client.console
         self._stream_mode: Optional[str] = None  # "normal" | "tmux" | None
         self._live = None
-        self._stream_started = False
-        self._tmux_box_width = None
-        self._tmux_line_buf: str = ""
-        # Track incremental progress for tool call streaming in tmux
-        # Per tool-call index: {"name_len": int, "args_len": int, "printed_header": int}
-        self._tmux_toolcall_progress: Dict[int, Dict[str, int]] = {}
-        # Reasoning streaming flag for tmux
-        self._tmux_reasoning_started: bool = False
+        # tmux streaming state
+        self._tmux_box_width: Optional[int] = None
+        self._tmux_content_box: Optional[TmuxBox] = None
+        self._tmux_reasoning_box: Optional[TmuxBox] = None
+        self._tmux_tool_boxes: Dict[int, TmuxBox] = {}
+        # For normal mode, we reuse prior rendering code
 
     def get_border_style(self, style: str) -> str:
         return style if self.client.borders_enabled else "none"
@@ -38,7 +158,6 @@ class DisplayManager:
         )
 
     def render_message(self, msg: Dict, is_loading: bool = False) -> None:
-        """Renders a single message to the console."""
         try:
             role = msg.get("role")
             if role == "user":
@@ -47,10 +166,8 @@ class DisplayManager:
                 border_style = "green" if self.client.borders_enabled else "none"
                 content_renderable = Text(msg.get("content", "") or "[No content]", no_wrap=False, overflow="fold")
                 self.console.print(Panel(content_renderable, title=title, border_style=border_style, box=self.client.boxStyle), crop=False)
-
             elif role == "assistant":
                 self.console.print(self._create_assistant_panel(msg))
-
             elif role == "tool":
                 output_renderable = Text(msg.get("content", "") or "[No output]", no_wrap=False, overflow="fold")
                 border_style = "green" if self.client.borders_enabled else "none"
@@ -60,7 +177,7 @@ class DisplayManager:
                     border_style=border_style,
                     box=self.client.boxStyle
                 ), crop=False)
-                # Special pretty summary for wait_agents
+                # Pretty summaries remain
                 try:
                     if msg.get('name') == 'wait_agents':
                         data = json.loads(msg.get('content') or '{}')
@@ -88,7 +205,6 @@ class DisplayManager:
                                 ), crop=False)
                 except Exception:
                     pass
-                # Pretty summary for list_agents
                 try:
                     if msg.get('name') == 'list_agents':
                         data = json.loads(msg.get('content') or '{}')
@@ -121,13 +237,10 @@ class DisplayManager:
         content = msg.get("content", "")
         tool_calls = msg.get("tool_calls", [])
         renderables = []
-
         model_name = live_model_name or msg.get("model_key", self.client.current_model_key)
         title = f"[bold cyan]Assistant ({model_name})[/bold cyan]"
-
         if content:
             renderables.append(Text(content, justify="left", no_wrap=False, overflow="fold"))
-
         if tool_calls:
             for tc in tool_calls:
                 func = tc.get("function", {})
@@ -148,159 +261,74 @@ class DisplayManager:
                         border_style="yellow",
                         box=self.client.boxStyle
                     ))
-
         if not renderables:
             renderables.append(Text("[No content or tool calls]"))
-
         border_style = "cyan" if self.client.borders_enabled else "none"
-        return Panel(
-            Group(*renderables),
-            title=title,
-            border_style=border_style,
-            box=self.client.boxStyle
-        )
+        return Panel(Group(*renderables), title=title, border_style=border_style, box=self.client.boxStyle)
 
     # Streaming API centralization
     def begin_stream(self, model_name: str, mode: str):
         self._stream_mode = mode
-        self._stream_started = False
-        self._tmux_line_buf = ""
-        self._tmux_toolcall_progress = {}
-        self._tmux_reasoning_started = False
         if mode == "normal":
             from rich.live import Live
             self._live = Live(console=self.console, auto_refresh=False, vertical_overflow="visible")
             self._live.__enter__()
             self._live.update(self.create_live_display(None, {}), refresh=True)
         elif mode == "tmux":
-            # Always show a header, even if borders are off
-            if self.client.borders_enabled:
+            # Lazy width provider so it always reflects current terminal
+            def width_provider():
                 import shutil
-                from rich import box as _box
-                width = shutil.get_terminal_size((80, 20)).columns
-                self._tmux_box_width = max(20, width - 2)
-                if self.client.boxStyle is _box.ROUNDED:
-                    tl, tr, h = "╭", "╮", "─"
-                else:
-                    tl, tr, h = "┌", "┐", "─"
-                inner_width = self._tmux_box_width - 2
-                title = f" Assistant ({model_name}) "
-                if len(title) > inner_width:
-                    title = title[:max(0, inner_width)]
-                pad_left = max(0, (inner_width - len(title)) // 2)
-                pad_right = max(0, inner_width - len(title) - pad_left)
-                self.console.print(f"{tl}{h * pad_left}{title}{h * pad_right}{tr}")
-            else:
-                # Header without borders
-                self.console.print(f"--- Assistant ({model_name}) ---")
+                w = shutil.get_terminal_size((80, 20)).columns
+                # match previous behavior: width minus 0, tmux boxes add borders themselves
+                return max(20, w)
+            self._tmux_box_width = width_provider()
+            # Create boxes but do not open them until content arrives
+            self._tmux_content_box = TmuxBox(self.console, f"Assistant ({model_name})", "cyan", self.client.borders_enabled, self.client.boxStyle, lambda: self._tmux_box_width)
+            self._tmux_reasoning_box = TmuxBox(self.console, "Reasoning", "magenta", self.client.borders_enabled, self.client.boxStyle, lambda: self._tmux_box_width)
+            self._tmux_tool_boxes = {}
 
-    def _emit_tmux_wrapped_lines(self, text: str):
-        if text is None:
-            return
-        self._tmux_line_buf += text
-        width = (self._tmux_box_width - 2) if (self._tmux_box_width and self.client.borders_enabled) else None
-
-        def emit_line(line: str):
-            if self._tmux_box_width and self.client.borders_enabled:
-                avail = self._tmux_box_width - 2
-                self.console.print(f"│{line.ljust(avail)}│")
-            else:
-                self.console.print(line)
-
-        while True:
-            if "\n" in self._tmux_line_buf:
-                line, self._tmux_line_buf = self._tmux_line_buf.split("\n", 1)
-                if width:
-                    start = 0
-                    while start < len(line):
-                        segment = line[start: start + width + 1]
-                        if len(segment) <= width:
-                            emit_line(segment)
-                            break
-                        cut = segment.rfind(" ", 0, width)
-                        if cut == -1:
-                            cut = width
-                        emit_line(segment[:cut])
-                        start += cut
-                else:
-                    emit_line(line)
-                self._stream_started = True
-            else:
-                if width and len(self._tmux_line_buf) > width:
-                    segment = self._tmux_line_buf[: width + 1]
-                    cut = segment.rfind(" ", 0, width)
-                    if cut == -1:
-                        cut = width
-                    emit_line(self._tmux_line_buf[:cut])
-                    self._tmux_line_buf = self._tmux_line_buf[cut:]
-                    self._stream_started = True
-                    continue
-                break
-
-    def _emit_tmux_tool_delta(self, idx: int, name: str, args_str: str):
-        # Maintain name and args streaming positions and header printing per tool-call index
-        prog = self._tmux_toolcall_progress.setdefault(idx, {"name_len": 0, "args_len": 0, "printed_header": 0})
-
-        # Name delta streaming
-        if name:
-            new_name_part = name[prog["name_len"]:]
-            if new_name_part:
-                if not prog["printed_header"]:
-                    self._emit_tmux_wrapped_lines(f"\n[Tool Call] ")
-                    prog["printed_header"] = 1
-                self._emit_tmux_wrapped_lines(new_name_part)
-                prog["name_len"] = len(name)
-
-        # Arguments delta streaming with natural wrapping (no word-per-line)
-        if args_str:
-            if prog["args_len"] == 0:
-                # First time we see args for this tool call, separate with a newline
-                self._emit_tmux_wrapped_lines("\n")
-            new_args_part = args_str[prog["args_len"]:]
-            if new_args_part:
-                # Stream the new chunk as-is; wrapping handled in _emit_tmux_wrapped_lines
-                self._emit_tmux_wrapped_lines(new_args_part)
-                prog["args_len"] = len(args_str)
-
-    def _emit_tmux_reasoning(self, text: str):
-        if not text:
-            return
-        if not self._tmux_reasoning_started:
-            # Print a header once per stream for reasoning
-            self._emit_tmux_wrapped_lines("\n[Reasoning] ")
-            self._tmux_reasoning_started = True
-        self._emit_tmux_wrapped_lines(text)
+    def _ensure_tool_box(self, idx: int, name: str) -> TmuxBox:
+        tb = self._tmux_tool_boxes.get(idx)
+        if tb is None:
+            title = f"Tool Call: {name}" if name else "Tool Call"
+            tb = TmuxBox(self.console, title, "yellow", self.client.borders_enabled, self.client.boxStyle, lambda: self._tmux_box_width)
+            self._tmux_tool_boxes[idx] = tb
+        return tb
 
     def stream_chunk(self, content: Optional[str] = None, reasoning: Optional[str] = None, tool_calls_delta: Optional[Dict] = None, model_name: Optional[str] = None, buffers: Optional[Dict] = None):
         if self._stream_mode == "normal":
             if not self._live:
                 return
-            # Build a stable panel that includes content + tool calls preview
             assistant_buf = {
                 "content": "".join(buffers.get("assistant_text_parts", [])) if buffers else "",
                 "tool_calls": list((buffers.get("tool_calls_buf") or {}).values())
             }
             self._live.update(self.create_live_display("".join(buffers.get("reasoning_parts", [])) if buffers else None, assistant_buf), refresh=True)
         elif self._stream_mode == "tmux":
-            # Reasoning first (if enabled)
-            if self.client.show_thinking and reasoning:
-                self._emit_tmux_reasoning(reasoning)
-            # Then content
-            if content:
-                self._emit_tmux_wrapped_lines(content)
-            # Incremental tool call streaming
+            # Reasoning in its own box
+            if self.client.show_thinking and reasoning and self._tmux_reasoning_box:
+                self._tmux_reasoning_box.emit(reasoning)
+            # Content in its own box
+            if content and self._tmux_content_box:
+                self._tmux_content_box.emit(content)
+            # Tool call streaming: one box per tool index
             if buffers and buffers.get("tool_calls_buf"):
-                for idx, tc in (buffers["tool_calls_buf"].items() if isinstance(buffers["tool_calls_buf"], dict) else enumerate(buffers["tool_calls_buf"])):
+                items = buffers["tool_calls_buf"].items() if isinstance(buffers["tool_calls_buf"], dict) else enumerate(buffers["tool_calls_buf"]) 
+                for idx, tc in items:
                     func = tc.get("function", {})
                     name = func.get("name", "") or ""
                     args_str = func.get("arguments", "") or ""
-                    self._emit_tmux_tool_delta(int(idx), name, args_str)
+                    tb = self._ensure_tool_box(int(idx), name)
+                    # If the box hasn't started yet and we have a name, update the title before first emit
+                    if not tb.started and name:
+                        tb.title = f"Tool Call: {name}"
+                    # Stream args normally
+                    tb.emit(args_str)
 
     def end_stream(self, final_assistant_msg: Dict):
         mode = self._stream_mode
         self._stream_mode = None
         if mode == "normal":
-            # Close Live first to avoid redraw conflicts, then print final once
             if self._live:
                 try:
                     self._live.__exit__(None, None, None)
@@ -309,119 +337,52 @@ class DisplayManager:
                 self._live = None
             self.console.print(self._create_assistant_panel(final_assistant_msg, live_model_name=self.client.current_model_key))
         elif mode == "tmux":
-            # Flush any remaining buffered text as final lines
-            if self._tmux_line_buf:
-                width = (self._tmux_box_width - 2) if (self._tmux_box_width and self.client.borders_enabled) else None
-                def emit_line(line: str):
-                    if self._tmux_box_width and self.client.borders_enabled:
-                        avail = self._tmux_box_width - 2
-                        self.console.print(f"│{line.ljust(avail)}│")
-                    else:
-                        self.console.print(line)
-                line = self._tmux_line_buf
-                if width:
-                    start = 0
-                    while start < len(line):
-                        segment = line[start: start + width + 1]
-                        if len(segment) <= width:
-                            emit_line(segment)
-                            break
-                        cut = segment.rfind(" ", 0, width)
-                        if cut == -1:
-                            cut = width
-                        emit_line(segment[:cut])
-                        start += cut
-                else:
-                    emit_line(line)
-                self._tmux_line_buf = ""
-                self._stream_started = True
-            # Draw bottom border only if we drew a header and content started
-            if self.client.borders_enabled and self._tmux_box_width and self._stream_started:
-                from rich import box as _box
-                if self.client.boxStyle is _box.ROUNDED:
-                    bl, br, h = "╰", "╯", "─"
-                else:
-                    bl, br, h = "└", "┘", "─"
-                self.console.print(f"{bl}{h * (self._tmux_box_width - 2)}{br}")
+            # Close any open boxes in tmux mode
+            if self._tmux_reasoning_box:
+                self._tmux_reasoning_box.close()
+            if self._tmux_content_box:
+                self._tmux_content_box.close()
+            for tb in self._tmux_tool_boxes.values():
+                tb.close()
+            self._tmux_tool_boxes.clear()
+            self._tmux_content_box = None
+            self._tmux_reasoning_box = None
             self._tmux_box_width = None
-            self._tmux_toolcall_progress = {}
-            self._tmux_reasoning_started = False
 
     def create_live_display(self, reasoning: Optional[str], assistant_msg: Dict) -> Group:
         renderables = []
-        
-        # Always show a header even without borders in normal mode live
         header_text = f"Assistant ({self.client.current_model_key})"
         if self.client.borders_enabled:
-            renderables.append(Panel(
-                Text(header_text),
-                border_style="cyan",
-                box=self.client.boxStyle
-            ))
+            renderables.append(Panel(Text(header_text), border_style="cyan", box=self.client.boxStyle))
         else:
             renderables.append(Text(f"--- {header_text} ---"))
-
         if self.client.show_thinking and reasoning:
-            renderables.append(Panel(
-                Text(reasoning, justify="left", no_wrap=False, overflow="fold"),
-                title="[bold magenta]Reasoning[/bold magenta]",
-                border_style="magenta",
-                box=self.client.boxStyle
-            ))
-
+            renderables.append(Panel(Text(reasoning, justify="left", no_wrap=False, overflow="fold"), title="[bold magenta]Reasoning[/bold magenta]", border_style="magenta", box=self.client.boxStyle))
         content = assistant_msg.get("content") or ""
         tool_calls = assistant_msg.get("tool_calls") or []
-
         if content or tool_calls:
-            # Build assistant block with content and tool call previews
             sub_renders = []
             if content:
                 sub_renders.append(Text(content, justify="left", no_wrap=False, overflow="fold"))
             if tool_calls:
-                from rich.syntax import Syntax
                 for tc in tool_calls:
                     func = tc.get("function", {})
                     name = func.get("name", "")
                     args_str = func.get("arguments", "")
                     title = f"[bold yellow]Tool Call: {name}[/bold yellow]" if name else "[bold yellow]Tool Call[/bold yellow]"
-                    # Try to show code for bash/python
                     try:
                         import json as _json
                         parsed = _json.loads(args_str or "{}")
                         script = parsed.get("script", "")
                         if script and name in ["bash", "python"]:
                             lang = "bash" if name == "bash" else "python"
-                            sub_renders.append(Panel(
-                                Syntax(script, lang, theme="monokai", line_numbers=self.client.borders_enabled, word_wrap=True),
-                                title=title,
-                                border_style="yellow",
-                                box=self.client.boxStyle
-                            ))
+                            sub_renders.append(Panel(Syntax(script, lang, theme="monokai", line_numbers=self.client.borders_enabled, word_wrap=True), title=title, border_style="yellow", box=self.client.boxStyle))
                         else:
-                            sub_renders.append(Panel(
-                                Text(args_str or "{}", no_wrap=False, overflow="fold"),
-                                title=title,
-                                border_style="yellow",
-                                box=self.client.boxStyle
-                            ))
+                            sub_renders.append(Panel(Text(args_str or "{}", no_wrap=False, overflow="fold"), title=title, border_style="yellow", box=self.client.boxStyle))
                     except Exception:
-                        sub_renders.append(Panel(
-                            Text(args_str or "{}", no_wrap=False, overflow="fold"),
-                            title=title,
-                            border_style="yellow",
-                            box=self.client.boxStyle
-                        ))
+                        sub_renders.append(Panel(Text(args_str or "{}", no_wrap=False, overflow="fold"), title=title, border_style="yellow", box=self.client.boxStyle))
             if sub_renders:
-                renderables.append(Panel(
-                    Group(*sub_renders),
-                    border_style="cyan" if self.client.borders_enabled else "none",
-                    box=self.client.boxStyle
-                ))
+                renderables.append(Panel(Group(*sub_renders), border_style="cyan" if self.client.borders_enabled else "none", box=self.client.boxStyle))
         else:
-            renderables.append(Panel(
-                "[dim]Assistant is thinking...[/dim]",
-                border_style="cyan" if self.client.borders_enabled else "none",
-                box=self.client.boxStyle
-            ))
-
+            renderables.append(Panel("[dim]Assistant is thinking...[/dim]", border_style="cyan" if self.client.borders_enabled else "none", box=self.client.boxStyle))
         return Group(*renderables)
