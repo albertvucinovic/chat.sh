@@ -485,6 +485,7 @@ class DisplayManager:
             pretty_msg = dict(final_assistant_msg)
             self.console.print(self._create_assistant_panel(pretty_msg, live_model_name=self.client.current_model_key, pretty_tool_calls=True))
         elif mode == "tmux":
+            # Close all tmux raw panes first
             if self._tmux_active_id is not None:
                 cur = self._tmux_sessions.get(self._tmux_active_id)
                 if cur:
@@ -495,6 +496,9 @@ class DisplayManager:
                     sess.close()
             self._tmux_sessions.clear()
             self._tmux_box_width = None
+            # Immediately show pretty-printed final assistant panel (after raw panes close)
+            pretty_msg = dict(final_assistant_msg)
+            self.console.print(self._create_assistant_panel(pretty_msg, live_model_name=self.client.current_model_key, pretty_tool_calls=True))
 
     def create_live_display(self, reasoning: Optional[str], assistant_msg: Dict) -> Group:
         renderables = []
