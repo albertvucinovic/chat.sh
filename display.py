@@ -274,8 +274,9 @@ class DisplayManager:
                         box=self.client.boxStyle
                     ))
                 else:
+                    pretty = (args_str or "").replace("\\n", "\n")
                     renderables.append(Panel(
-                        Text(args_str or "", no_wrap=False, overflow="fold"),
+                        Text(pretty, no_wrap=False, overflow="fold"),
                         title=f"[bold yellow]Tool Call: {name}[/bold yellow]",
                         border_style="yellow",
                         box=self.client.boxStyle
@@ -358,11 +359,12 @@ class DisplayManager:
                     sess = self._ensure_session(sid, title)
                     if not sess.box.started and name:
                         sess.box.title = title
-                    # Append cumulative or delta so partials show
-                    if len(args_str) >= sess.consumed_len:
-                        sess.append_cumulative(args_str)
+                    # Convert literal \n to real newlines for display
+                    display_args = args_str.replace("\\n", "\n")
+                    if len(display_args) >= sess.consumed_len:
+                        sess.append_cumulative(display_args)
                     else:
-                        sess.append(args_str)
+                        sess.append(display_args)
                     enq_order.append(sid)
                     last_tool_sid = sid
             # Prefer the most recent tool pane if any updated; else rotate as before
@@ -374,7 +376,6 @@ class DisplayManager:
                 active = self._tmux_sessions.get(self._tmux_active_id)
                 if active:
                     active.emit_all()
-                # If we didn't prioritize a tool, rotate to next to keep progress visible
                 if last_tool_sid is None:
                     for sid in enq_order:
                         if sid != self._tmux_active_id:
@@ -433,9 +434,11 @@ class DisplayManager:
                             lang = "bash" if name == "bash" else "python"
                             sub_renders.append(Panel(Syntax(script, lang, theme="monokai", line_numbers=self.client.borders_enabled, word_wrap=True), title=title, border_style="yellow", box=self.client.boxStyle))
                         else:
-                            sub_renders.append(Panel(Text(args_str or "{}", no_wrap=False, overflow="fold"), title=title, border_style="yellow", box=self.client.boxStyle))
+                            pretty = (args_str or "{}").replace("\\n", "\n")
+                            sub_renders.append(Panel(Text(pretty, no_wrap=False, overflow="fold"), title=title, border_style="yellow", box=self.client.boxStyle))
                     except Exception:
-                        sub_renders.append(Panel(Text(args_str or "{}", no_wrap=False, overflow="fold"), title=title, border_style="yellow", box=self.client.boxStyle))
+                        pretty = (args_str or "{}").replace("\\n", "\n")
+                        sub_renders.append(Panel(Text(pretty, no_wrap=False, overflow="fold"), title=title, border_style="yellow", box=self.client.boxStyle))
             if sub_renders:
                 renderables.append(Panel(Group(*sub_renders), border_style="cyan" if self.client.borders_enabled else "none", box=self.client.boxStyle))
         else:
