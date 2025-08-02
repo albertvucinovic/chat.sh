@@ -118,10 +118,20 @@ class BoxSession:
         self.buffer: str = ""
         self.open_started = False
         self.closed = False
+        self.consumed_len: int = 0  # for cumulative strings
 
     def append(self, text: str):
         if text:
             self.buffer += text
+
+    def append_cumulative(self, full_text: str):
+        # Append only the delta since last seen length
+        if full_text is None:
+            return
+        new_part = full_text[self.consumed_len:]
+        if new_part:
+            self.buffer += new_part
+            self.consumed_len = len(full_text)
 
     def emit_all(self):
         if self.buffer:
@@ -317,7 +327,6 @@ class DisplayManager:
             }
             self._live.update(self.create_live_display("".join(buffers.get("reasoning_parts", [])) if buffers else None, assistant_buf), refresh=True)
         elif self._stream_mode == "tmux":
-            # Map chunks to sessions (reasoning, content, tool:<idx>)
             enq_order: List[str] = []
             if self.client.show_thinking and reasoning:
                 sid = "reasoning"
@@ -339,20 +348,17 @@ class DisplayManager:
                     sid = f"tool:{int(idx)}"
                     title = f"Tool Call: {name}" if name else "Tool Call"
                     sess = self._ensure_session(sid, title)
-                    # If the title was generic but we now have a name and box hasn't started yet, update
                     if not sess.box.started and name:
                         sess.box.title = title
-                    sess.append(args_str)
+                    # Append only delta for cumulative arguments
+                    sess.append_cumulative(args_str)
                     enq_order.append(sid)
-            # Activation: if nothing active yet, activate the earliest enqueued session
             if self._tmux_active_id is None and enq_order:
                 self._activate(enq_order[0])
-            # Emit into the active session only; other sessions buffer until activation
             if self._tmux_active_id is not None:
                 active = self._tmux_sessions.get(self._tmux_active_id)
                 if active:
                     active.emit_all()
-                # If a different session appeared in enq_order, we consider the current active ended and switch
                 for sid in enq_order:
                     if sid != self._tmux_active_id:
                         self._activate(sid)
@@ -370,13 +376,11 @@ class DisplayManager:
                 self._live = None
             self.console.print(self._create_assistant_panel(final_assistant_msg, live_model_name=self.client.current_model_key))
         elif mode == "tmux":
-            # Close the currently active session
             if self._tmux_active_id is not None:
                 cur = self._tmux_sessions.get(self._tmux_active_id)
                 if cur:
                     cur.close()
                 self._tmux_active_id = None
-            # Drain any remaining sessions in queue order
             for sid, sess in list(self._tmux_sessions.items()):
                 if not sess.closed:
                     sess.close()
