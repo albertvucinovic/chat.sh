@@ -1,4 +1,5 @@
 import json
+from collections import OrderedDict
 from typing import Dict, List, Optional
 
 from rich.console import Console, Group
@@ -8,17 +9,10 @@ from rich.text import Text
 
 
 class TmuxBox:
-    """Reusable tmux-like box renderer for streaming text with wrapping.
-
-    Behavior:
-      - Prints a top border/header once when first emitting content.
-      - Streams text with simple wrapping by terminal width, adding side borders when borders are enabled.
-      - Prints a bottom border once when closed and only if content started.
-    """
-    def __init__(self, console: Console, title: str, color: str, borders_enabled: bool, box_style, width_provider):
+    """Reusable tmux-like box renderer for streaming text with wrapping."""
+    def __init__(self, console: Console, title: str, borders_enabled: bool, box_style, width_provider):
         self.console = console
         self.title = title
-        self.color = color
         self.borders_enabled = borders_enabled
         self.box_style = box_style
         self.width_provider = width_provider  # callable returning full available width (including borders)
@@ -28,29 +22,21 @@ class TmuxBox:
 
     def _top(self):
         width = self.width_provider()
-        if not width:
-            # Fallback simple header
+        if not width or not self.borders_enabled:
             self.console.print(f"--- {self.title} ---")
             return
-        if not self.borders_enabled:
-            self.console.print(f"--- {self.title} ---")
-            return
-        # Draw top border with centered title
         inner_width = max(0, width - 2)
         title = f" {self.title} "
         if len(title) > inner_width:
             title = title[:inner_width]
         pad_left = max(0, (inner_width - len(title)) // 2)
         pad_right = max(0, inner_width - len(title) - pad_left)
-        # Use unicode boxes similar to existing logic
         tl, tr, h = ("╭", "╮", "─") if str(self.box_style).lower().find("rounded") != -1 else ("┌", "┐", "─")
         self.console.print(f"{tl}{h * pad_left}{title}{h * pad_right}{tr}")
 
     def _bottom(self):
         width = self.width_provider()
-        if not width:
-            return
-        if not self.borders_enabled:
+        if not width or not self.borders_enabled:
             return
         bl, br, h = ("╰", "╯", "─") if str(self.box_style).lower().find("rounded") != -1 else ("└", "┘", "─")
         self.console.print(f"{bl}{h * (max(0, width - 2))}{br}")
@@ -63,10 +49,31 @@ class TmuxBox:
         else:
             self.console.print(line)
 
+    def _emit_wrapped_line(self, line: str, wrap_width: Optional[int]):
+        if wrap_width:
+            start = 0
+            while start < len(line):
+                segment = line[start:start + wrap_width + 1]
+                if len(segment) <= wrap_width:
+                    self._emit_line(segment)
+                    break
+                cut = segment.rfind(" ", 0, wrap_width)
+                if cut == -1:
+                    cut = wrap_width
+                self._emit_line(segment[:cut])
+                start += cut
+        else:
+            self._emit_line(line)
+
+    @staticmethod
+    def _popline(buf: str):
+        parts = buf.split("\n", 1)
+        if len(parts) == 2:
+            return parts[0], parts[1]
+        return buf, ""
+
     def emit(self, text: Optional[str]):
-        if not text:
-            return
-        if self.closed:
+        if not text or self.closed:
             return
         if not self.started:
             self._top()
@@ -77,21 +84,8 @@ class TmuxBox:
 
         while True:
             if "\n" in self._line_buf:
-                line, self._line_buf = self._line_buf.split("\n", 1)
-                if wrap_width:
-                    start = 0
-                    while start < len(line):
-                        segment = line[start:start + wrap_width + 1]
-                        if len(segment) <= wrap_width:
-                            self._emit_line(segment)
-                            break
-                        cut = segment.rfind(" ", 0, wrap_width)
-                        if cut == -1:
-                            cut = wrap_width
-                        self._emit_line(segment[:cut])
-                        start += cut
-                else:
-                    self._emit_line(line)
+                line, self._line_buf = self._popline(self._line_buf)
+                self._emit_wrapped_line(line, wrap_width)
             else:
                 if wrap_width and len(self._line_buf) > wrap_width:
                     segment = self._line_buf[:wrap_width + 1]
@@ -106,29 +100,39 @@ class TmuxBox:
     def close(self):
         if self.closed:
             return
-        # flush remainder
         if self._line_buf:
             line = self._line_buf
             self._line_buf = ""
             width = self.width_provider()
             wrap_width = (width - 2) if (self.borders_enabled and width) else None
-            if wrap_width:
-                start = 0
-                while start < len(line):
-                    segment = line[start:start + wrap_width + 1]
-                    if len(segment) <= wrap_width:
-                        self._emit_line(segment)
-                        break
-                    cut = segment.rfind(" ", 0, wrap_width)
-                    if cut == -1:
-                        cut = wrap_width
-                    self._emit_line(segment[:cut])
-                    start += cut
-            else:
-                self._emit_line(line)
+            self._emit_wrapped_line(line, wrap_width)
         if self.started:
             self._bottom()
         self.closed = True
+
+
+class BoxSession:
+    def __init__(self, box_id: str, box: TmuxBox):
+        self.id = box_id
+        self.box = box
+        self.buffer: str = ""
+        self.open_started = False
+        self.closed = False
+
+    def append(self, text: str):
+        if text:
+            self.buffer += text
+
+    def emit_all(self):
+        if self.buffer:
+            self.box.emit(self.buffer)
+            self.buffer = ""
+
+    def close(self):
+        if not self.closed:
+            self.emit_all()
+            self.box.close()
+            self.closed = True
 
 
 class DisplayManager:
@@ -137,12 +141,10 @@ class DisplayManager:
         self.console = client.console
         self._stream_mode: Optional[str] = None  # "normal" | "tmux" | None
         self._live = None
-        # tmux streaming state
+        # tmux streaming queue state
         self._tmux_box_width: Optional[int] = None
-        self._tmux_content_box: Optional[TmuxBox] = None
-        self._tmux_reasoning_box: Optional[TmuxBox] = None
-        self._tmux_tool_boxes: Dict[int, TmuxBox] = {}
-        # For normal mode, we reuse prior rendering code
+        self._tmux_sessions: "OrderedDict[str, BoxSession]" = OrderedDict()
+        self._tmux_active_id: Optional[str] = None
 
     def get_border_style(self, style: str) -> str:
         return style if self.client.borders_enabled else "none"
@@ -275,25 +277,35 @@ class DisplayManager:
             self._live.__enter__()
             self._live.update(self.create_live_display(None, {}), refresh=True)
         elif mode == "tmux":
-            # Lazy width provider so it always reflects current terminal
             def width_provider():
                 import shutil
                 w = shutil.get_terminal_size((80, 20)).columns
-                # match previous behavior: width minus 0, tmux boxes add borders themselves
                 return max(20, w)
             self._tmux_box_width = width_provider()
-            # Create boxes but do not open them until content arrives
-            self._tmux_content_box = TmuxBox(self.console, f"Assistant ({model_name})", "cyan", self.client.borders_enabled, self.client.boxStyle, lambda: self._tmux_box_width)
-            self._tmux_reasoning_box = TmuxBox(self.console, "Reasoning", "magenta", self.client.borders_enabled, self.client.boxStyle, lambda: self._tmux_box_width)
-            self._tmux_tool_boxes = {}
+            self._tmux_sessions = OrderedDict()
+            self._tmux_active_id = None
 
-    def _ensure_tool_box(self, idx: int, name: str) -> TmuxBox:
-        tb = self._tmux_tool_boxes.get(idx)
-        if tb is None:
-            title = f"Tool Call: {name}" if name else "Tool Call"
-            tb = TmuxBox(self.console, title, "yellow", self.client.borders_enabled, self.client.boxStyle, lambda: self._tmux_box_width)
-            self._tmux_tool_boxes[idx] = tb
-        return tb
+    def _ensure_session(self, sid: str, title: str) -> BoxSession:
+        sess = self._tmux_sessions.get(sid)
+        if sess is None:
+            box = TmuxBox(self.console, title, self.client.borders_enabled, self.client.boxStyle, lambda: self._tmux_box_width)
+            sess = BoxSession(sid, box)
+            self._tmux_sessions[sid] = sess
+        return sess
+
+    def _activate(self, sid: str):
+        if self._tmux_active_id == sid:
+            return
+        # Close current active before switching
+        if self._tmux_active_id is not None:
+            cur = self._tmux_sessions.get(self._tmux_active_id)
+            if cur:
+                cur.close()
+        self._tmux_active_id = sid
+        # Emit any buffered content for the new active session immediately
+        new = self._tmux_sessions.get(sid)
+        if new:
+            new.emit_all()
 
     def stream_chunk(self, content: Optional[str] = None, reasoning: Optional[str] = None, tool_calls_delta: Optional[Dict] = None, model_name: Optional[str] = None, buffers: Optional[Dict] = None):
         if self._stream_mode == "normal":
@@ -305,25 +317,46 @@ class DisplayManager:
             }
             self._live.update(self.create_live_display("".join(buffers.get("reasoning_parts", [])) if buffers else None, assistant_buf), refresh=True)
         elif self._stream_mode == "tmux":
-            # Reasoning in its own box
-            if self.client.show_thinking and reasoning and self._tmux_reasoning_box:
-                self._tmux_reasoning_box.emit(reasoning)
-            # Content in its own box
-            if content and self._tmux_content_box:
-                self._tmux_content_box.emit(content)
-            # Tool call streaming: one box per tool index
+            # Map chunks to sessions (reasoning, content, tool:<idx>)
+            enq_order: List[str] = []
+            if self.client.show_thinking and reasoning:
+                sid = "reasoning"
+                sess = self._ensure_session(sid, "Reasoning")
+                sess.append(reasoning)
+                enq_order.append(sid)
+            if content:
+                sid = "content"
+                title = f"Assistant ({model_name or self.client.current_model_key})"
+                sess = self._ensure_session(sid, title)
+                sess.append(content)
+                enq_order.append(sid)
             if buffers and buffers.get("tool_calls_buf"):
                 items = buffers["tool_calls_buf"].items() if isinstance(buffers["tool_calls_buf"], dict) else enumerate(buffers["tool_calls_buf"]) 
                 for idx, tc in items:
                     func = tc.get("function", {})
                     name = func.get("name", "") or ""
                     args_str = func.get("arguments", "") or ""
-                    tb = self._ensure_tool_box(int(idx), name)
-                    # If the box hasn't started yet and we have a name, update the title before first emit
-                    if not tb.started and name:
-                        tb.title = f"Tool Call: {name}"
-                    # Stream args normally
-                    tb.emit(args_str)
+                    sid = f"tool:{int(idx)}"
+                    title = f"Tool Call: {name}" if name else "Tool Call"
+                    sess = self._ensure_session(sid, title)
+                    # If the title was generic but we now have a name and box hasn't started yet, update
+                    if not sess.box.started and name:
+                        sess.box.title = title
+                    sess.append(args_str)
+                    enq_order.append(sid)
+            # Activation: if nothing active yet, activate the earliest enqueued session
+            if self._tmux_active_id is None and enq_order:
+                self._activate(enq_order[0])
+            # Emit into the active session only; other sessions buffer until activation
+            if self._tmux_active_id is not None:
+                active = self._tmux_sessions.get(self._tmux_active_id)
+                if active:
+                    active.emit_all()
+                # If a different session appeared in enq_order, we consider the current active ended and switch
+                for sid in enq_order:
+                    if sid != self._tmux_active_id:
+                        self._activate(sid)
+                        break
 
     def end_stream(self, final_assistant_msg: Dict):
         mode = self._stream_mode
@@ -337,16 +370,17 @@ class DisplayManager:
                 self._live = None
             self.console.print(self._create_assistant_panel(final_assistant_msg, live_model_name=self.client.current_model_key))
         elif mode == "tmux":
-            # Close any open boxes in tmux mode
-            if self._tmux_reasoning_box:
-                self._tmux_reasoning_box.close()
-            if self._tmux_content_box:
-                self._tmux_content_box.close()
-            for tb in self._tmux_tool_boxes.values():
-                tb.close()
-            self._tmux_tool_boxes.clear()
-            self._tmux_content_box = None
-            self._tmux_reasoning_box = None
+            # Close the currently active session
+            if self._tmux_active_id is not None:
+                cur = self._tmux_sessions.get(self._tmux_active_id)
+                if cur:
+                    cur.close()
+                self._tmux_active_id = None
+            # Drain any remaining sessions in queue order
+            for sid, sess in list(self._tmux_sessions.items()):
+                if not sess.closed:
+                    sess.close()
+            self._tmux_sessions.clear()
             self._tmux_box_width = None
 
     def create_live_display(self, reasoning: Optional[str], assistant_msg: Dict) -> Group:
