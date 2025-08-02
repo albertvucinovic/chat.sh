@@ -73,12 +73,13 @@ class TmuxBox:
         return buf, ""
 
     def emit(self, text: Optional[str]):
-        if not text or self.closed:
+        if text is None or self.closed:
             return
         if not self.started:
             self._top()
             self.started = True
-        self._line_buf += text
+        if text:
+            self._line_buf += text
         width = self.width_provider()
         wrap_width = (width - 2) if (self.borders_enabled and width) else None
 
@@ -116,13 +117,13 @@ class BoxSession:
         self.id = box_id
         self.box = box
         self.buffer: str = ""
-        self.open_started = False
         self.closed = False
         self.consumed_len: int = 0  # for cumulative strings
 
     def append(self, text: str):
-        if text:
-            self.buffer += text
+        if text is None:
+            return
+        self.buffer += text
 
     def append_cumulative(self, full_text: str):
         # Append only the delta since last seen length
@@ -134,9 +135,8 @@ class BoxSession:
             self.consumed_len = len(full_text)
 
     def emit_all(self):
-        if self.buffer:
-            self.box.emit(self.buffer)
-            self.buffer = ""
+        self.box.emit(self.buffer)
+        self.buffer = ""
 
     def close(self):
         if not self.closed:
@@ -257,18 +257,25 @@ class DisplayManager:
             for tc in tool_calls:
                 func = tc.get("function", {})
                 name, args_str = func.get("name", "..."), func.get("arguments", "")
+                # Pretty if valid JSON & script; else show raw partial args during streaming
+                script = None
                 try:
-                    script = json.loads(args_str or '{}').get('script', args_str)
-                    lang = name if name in ["python", "bash"] else "json"
+                    parsed = json.loads(args_str or '{}')
+                    if isinstance(parsed, dict):
+                        script = parsed.get('script')
+                except Exception:
+                    script = None
+                if script and name in ["python", "bash"]:
+                    lang = name
                     renderables.append(Panel(
                         Syntax(script, lang, theme="monokai", line_numbers=self.client.borders_enabled, word_wrap=True),
                         title=f"[bold yellow]Tool Call: {name}[/bold yellow]",
                         border_style="yellow",
                         box=self.client.boxStyle
                     ))
-                except (json.JSONDecodeError, AttributeError):
+                else:
                     renderables.append(Panel(
-                        Text(args_str, no_wrap=False, overflow="fold"),
+                        Text(args_str or "", no_wrap=False, overflow="fold"),
                         title=f"[bold yellow]Tool Call: {name}[/bold yellow]",
                         border_style="yellow",
                         box=self.client.boxStyle
@@ -328,6 +335,7 @@ class DisplayManager:
             self._live.update(self.create_live_display("".join(buffers.get("reasoning_parts", [])) if buffers else None, assistant_buf), refresh=True)
         elif self._stream_mode == "tmux":
             enq_order: List[str] = []
+            last_tool_sid: Optional[str] = None
             if self.client.show_thinking and reasoning:
                 sid = "reasoning"
                 sess = self._ensure_session(sid, "Reasoning")
@@ -350,19 +358,28 @@ class DisplayManager:
                     sess = self._ensure_session(sid, title)
                     if not sess.box.started and name:
                         sess.box.title = title
-                    # Append only delta for cumulative arguments
-                    sess.append_cumulative(args_str)
+                    # Append cumulative or delta so partials show
+                    if len(args_str) >= sess.consumed_len:
+                        sess.append_cumulative(args_str)
+                    else:
+                        sess.append(args_str)
                     enq_order.append(sid)
-            if self._tmux_active_id is None and enq_order:
+                    last_tool_sid = sid
+            # Prefer the most recent tool pane if any updated; else rotate as before
+            if last_tool_sid is not None:
+                self._activate(last_tool_sid)
+            elif self._tmux_active_id is None and enq_order:
                 self._activate(enq_order[0])
             if self._tmux_active_id is not None:
                 active = self._tmux_sessions.get(self._tmux_active_id)
                 if active:
                     active.emit_all()
-                for sid in enq_order:
-                    if sid != self._tmux_active_id:
-                        self._activate(sid)
-                        break
+                # If we didn't prioritize a tool, rotate to next to keep progress visible
+                if last_tool_sid is None:
+                    for sid in enq_order:
+                        if sid != self._tmux_active_id:
+                            self._activate(sid)
+                            break
 
     def end_stream(self, final_assistant_msg: Dict):
         mode = self._stream_mode
