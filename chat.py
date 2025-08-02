@@ -124,7 +124,8 @@ def main():
             "[bold]/tree[/bold] - List children in current tree.  [bold]/attach <tree_id?> [agent_id?][/bold] - Attach tmux.\n"
             "[bold]/tree use <tree_id>[/bold] - Switch active agent tree for this session.  [bold]/tree list[/bold] - List existing trees.\n"
             "[bold]/o <tree_id>|list[/bold] - Attach to a tree's tmux session (list to show trees).\n"
-            "[bold]/toggleEscape[/bold] - Toggle display of tool call arguments between escaped and unescaped.",
+            "[bold]/toggleEscape[/bold] - Toggle display of tool call arguments between escaped and unescaped.\n"
+            "[bold]/exportHtml <filename.html>[/bold] - Export current chat as a visually striking HTML page.",
             title="[bold]Welcome[/bold]",
             border_style=client.get_border_style("magenta")
         )
@@ -214,6 +215,23 @@ def main():
                 console.print(f"[cyan]Tool argument display is now {status}[/cyan]")
                 continue
 
+            elif user_input.startswith("/exportHtml"):
+                rest = user_input[len("/exportHtml"):].strip()
+                filename = rest or "chat_export.html"
+                if not filename.lower().endswith('.html'):
+                    filename += '.html'
+                try:
+                    from export_html import export_chat_file
+                except Exception as e:
+                    console.print(Panel(f"Export module not available: {e}", title="[bold red]Export Error[/bold red]", border_style="red", box=client.boxStyle))
+                    continue
+                try:
+                    out_path = export_chat_file(client.messages, filename, short_recap=client.short_recap, title_suffix="Egg")
+                    console.print(Panel(f"Exported to {out_path}", title="[bold green]Export HTML[/bold green]", border_style="green", box=client.boxStyle))
+                except Exception as e:
+                    console.print(Panel(f"Failed to export: {e}", title="[bold red]Export Error[/bold red]", border_style="red", box=client.boxStyle))
+                continue
+
             elif user_input.startswith("/popContext"):
                 client.messages.append({"role": "user", "content": user_input})
                 return_value = user_input[len("/popContext"):].strip()
@@ -257,7 +275,7 @@ def main():
                         try:
                             if candidate.startswith('global/'):
                                 script_dir = os.path.dirname(os.path.realpath(__file__))
-                                resolved_fp = os.path.join(script_dir, 'global_commands', candidate[len('global/'):])
+                                resolved_fp = os.path.join(script_dir, 'global_commands', candidate[len('global/') :])
                             else:
                                 resolved_fp = candidate
                             if os.path.isfile(resolved_fp):
@@ -276,7 +294,7 @@ def main():
                     try:
                         if file_path.startswith('global/'):
                             script_dir = os.path.dirname(os.path.realpath(__file__))
-                            resolved_fp = os.path.join(script_dir, 'global_commands', file_path[len('global/'):])
+                            resolved_fp = os.path.join(script_dir, 'global_commands', file_path[len('global/') :])
                         else:
                             resolved_fp = file_path
                         with open(resolved_fp, 'r', encoding='utf-8') as f:
@@ -337,7 +355,7 @@ def main():
                         try:
                             if candidate.startswith('global/'):
                                 script_dir = os.path.dirname(os.path.realpath(__file__))
-                                resolved_fp = os.path.join(script_dir, 'global_commands', candidate[len('global/'):])
+                                resolved_fp = os.path.join(script_dir, 'global_commands', candidate[len('global/') :])
                             else:
                                 resolved_fp = candidate
                             if os.path.isfile(resolved_fp):
@@ -356,7 +374,7 @@ def main():
                     try:
                         if file_path.startswith('global/'):
                             script_dir = os.path.dirname(os.path.realpath(__file__))
-                            resolved_fp = os.path.join(script_dir, 'global_commands', file_path[len('global/'):])
+                            resolved_fp = os.path.join(script_dir, 'global_commands', file_path[len('global/') :])
                         else:
                             resolved_fp = file_path
                         with open(resolved_fp, 'r', encoding='utf-8') as f:
@@ -513,7 +531,7 @@ def main():
                                     line += f" — {rv}"
                                 lines.append(line)
                         pretty = "\n".join(lines) or "<no children>"
-                        console.print(Panel(Text(pretty), title="[bold cyan]Agent Tree (Pretty)[/bold cyan]", border_style="cyan", box=client.boxStyle))
+                        console.print(Panel(Text(pretty), title="[bold cyan]Agent Tree (Pretty)[/bold cyan]", border_style=client.get_border_style("cyan"), box=client.boxStyle))
                     except Exception:
                         pass
                 except Exception as e:

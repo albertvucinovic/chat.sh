@@ -9,7 +9,9 @@ from rich.text import Text
 
 
 class TmuxBox:
-    """Reusable tmux-like box renderer for streaming text with wrapping."""
+    """Reusable tmux-like box renderer for streaming text with wrapping.
+    Avoid Rich markup parsing for streamed lines to prevent MarkupError.
+    """
     def __init__(self, console: Console, title: str, borders_enabled: bool, box_style, width_provider):
         self.console = console
         self.title = title
@@ -23,7 +25,7 @@ class TmuxBox:
     def _top(self):
         width = self.width_provider()
         if not width or not self.borders_enabled:
-            self.console.print(f"--- {self.title} ---")
+            self.console.print(Text(f"--- {self.title} ---"), markup=False)
             return
         inner_width = max(0, width - 2)
         title = f" {self.title} "
@@ -32,22 +34,23 @@ class TmuxBox:
         pad_left = max(0, (inner_width - len(title)) // 2)
         pad_right = max(0, inner_width - len(title) - pad_left)
         tl, tr, h = ("╭", "╮", "─") if str(self.box_style).lower().find("rounded") != -1 else ("┌", "┐", "─")
-        self.console.print(f"{tl}{h * pad_left}{title}{h * pad_right}{tr}")
+        self.console.print(Text(f"{tl}{h * pad_left}{title}{h * pad_right}{tr}"), markup=False)
 
     def _bottom(self):
         width = self.width_provider()
         if not width or not self.borders_enabled:
             return
         bl, br, h = ("╰", "╯", "─") if str(self.box_style).lower().find("rounded") != -1 else ("└", "┘", "─")
-        self.console.print(f"{bl}{h * (max(0, width - 2))}{br}")
+        self.console.print(Text(f"{bl}{h * (max(0, width - 2))}{br}"), markup=False)
 
     def _emit_line(self, line: str):
         width = self.width_provider()
         if self.borders_enabled and width:
             avail = max(0, width - 2)
-            self.console.print(f"│{line.ljust(avail)}│")
+            content = line.ljust(avail)
+            self.console.print(Text(f"│{content}│", no_wrap=False, overflow="fold"), markup=False)
         else:
-            self.console.print(line)
+            self.console.print(Text(line, no_wrap=False, overflow="fold"), markup=False)
 
     def _emit_wrapped_line(self, line: str, wrap_width: Optional[int]):
         if wrap_width:
