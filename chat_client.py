@@ -46,7 +46,7 @@ class ChatClient:
         self.display_manager = DisplayManager(self)
         self.headers = {"Content-Type": "application/json"}
         # Start with borders disabled by default
-        self.borders_enabled = False
+        self.borders_enabled = True
         self.chat_dir = Path.cwd() / ".egg/localChats"
         self.chat_dir.mkdir(parents=True, exist_ok=True)
         self.current_model_key = None
