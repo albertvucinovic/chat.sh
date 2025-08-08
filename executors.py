@@ -141,34 +141,53 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str) -> str:
     except Exception as e:
         return f"Error: {str(e)}"
 
-def replace_lines(file_path: str, start_line: int, end_line: int, new_content: str) -> str:
-    """Boundary-based replace/insert for text files.
+def replace_lines(file_path: str, start_line: int, end_line: int, new_content: str,
+                   indexing: str = "boundary", operation: str = "auto", position: str = "after") -> str:
+    """Flexible line editing with intuitive options.
 
-    Semantics:
-    - start_line and end_line are boundary indexes in [0..N], where N = number of lines in the file.
-      Boundary 0 = before the first line.
-      Boundary 1 = after line 1 (between line 1 and 2).
-      ... up to N = after the last line.
-    - If start_line == end_line: INSERT new_content at that boundary (no lines removed).
-      Examples: (0,0) insert at beginning; (1,1) insert between line 1 and 2; (N,N) append at end.
-    - If start_line < end_line: REPLACE the block of lines between the boundaries:
-      Lines with 1-based indexes in [start_line+1 .. end_line] are replaced.
-      Examples: (0,1) replaces line 1; (1,3) replaces lines 2..3.
+    Two indexing modes:
+    - indexing = "boundary" (default, backward compatible):
+      Boundaries are positions 0..N (N = number of lines).
+      • start==end: insert at that boundary (e.g., (0,0) at beginning, (1,1) between 1 and 2, (N,N) append)
+      • start<end: replace lines with 1-based indexes in [start+1..end]
+    - indexing = "line":
+      Use 1-based line numbers directly.
+      • operation = "replace" (or auto when start<end): replace inclusive lines [start..end]
+      • operation = "insert" (or auto when start==end): insert using position:
+          - position = "after" (default) or "before"
+          - (0,0): insert at beginning
+          - (k,k) with 1<=k<=N: insert before/after line k
+          - (N+1,N+1): insert at end (after last line)
 
-    Validation:
-    - 0 <= start_line <= end_line <= N, where N is computed from the current file (0 for empty).
-    - If the file does not exist and both boundaries are 0, the file will be created with new_content.
-      Otherwise, a missing file is an error.
+    Notes:
+    - A missing file is only auto-created when inserting at the beginning: (0,0) with indexing='boundary' or
+      indexing='line' and operation='insert'.
+    - new_content is split on lines and each line gets a trailing \n.
     """
     try:
         abs_path = Path(file_path).resolve()
 
+        # Normalize options
+        idx_mode = (indexing or "boundary").strip().lower()
+        op = (operation or "auto").strip().lower()
+        pos = (position or "after").strip().lower()
+        if idx_mode not in ("boundary", "line"):
+            return "Error: indexing must be 'boundary' or 'line'."
+        if op not in ("auto", "insert", "replace"):
+            return "Error: operation must be 'auto', 'insert', or 'replace'."
+        if pos not in ("before", "after"):
+            return "Error: position must be 'before' or 'after'."
+
+        # Load file content (allow create-on-insert-at-beginning)
         created_file = False
-        # Read file if it exists; otherwise allow creation for (0,0)
         if not abs_path.exists():
-            if start_line == 0 and end_line == 0:
+            if idx_mode == "boundary" and start_line == 0 and end_line == 0:
                 lines = []
                 created_file = True
+            elif idx_mode == "line" and start_line == 0 and end_line == 0 and (op in ("auto", "insert")):
+                lines = []
+                created_file = True
+                op = "insert"
             else:
                 return f"Error: File not found at {file_path}"
         else:
@@ -178,34 +197,76 @@ def replace_lines(file_path: str, start_line: int, end_line: int, new_content: s
 
         N = len(lines)
 
-        # Validate boundaries
-        if start_line < 0 or end_line < 0:
-            return "Error: Line boundaries must be non-negative (0..N)."
-        if start_line > end_line:
-            return "Error: start_line cannot be greater than end_line."
-        if start_line > N or end_line > N:
-            return f"Error: boundary out of bounds. File has {N} line(s); valid boundaries are 0..{N}."
-
-        # Build inserted segment using \n endings (keeps tool behavior consistent)
+        # Prepare insert segment
         insert_segment = []
         if new_content:
-            insert_segment = [line + '\n' for line in new_content.splitlines()]
+            insert_segment = [line + "\n" for line in new_content.splitlines()]
 
-        # Splice using boundary indices (remove lines [start_line, end_line))
-        new_lines = lines[:start_line] + insert_segment + lines[end_line:]
+        def write_and_report(bound_s: int, bound_e: int, replaced_count: int, note: str = "") -> str:
+            new_lines = lines[:bound_s] + insert_segment + lines[bound_e:]
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(abs_path, 'w', newline='') as f:
+                f.writelines(new_lines)
+            if replaced_count == 0:
+                return f"Success: Inserted at boundary {bound_s} in {file_path}.{note}"
+            else:
+                return f"Success: Replaced {replaced_count} line(s) between boundaries {bound_s} and {bound_e} in {file_path}.{note}"
 
-        abs_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(abs_path, 'w', newline='') as f:
-            f.writelines(new_lines)
+        # Boundary mode (unchanged semantics, with validation)
+        if idx_mode == "boundary":
+            if start_line < 0 or end_line < 0:
+                return "Error: Line boundaries must be non-negative (0..N)."
+            if start_line > end_line:
+                return "Error: start_line cannot be greater than end_line."
+            if start_line > N or end_line > N:
+                return f"Error: boundary out of bounds. File has {N} line(s); valid boundaries are 0..{N}."
+            # If user explicitly chose operation, validate coherence
+            if op == "insert" and start_line != end_line:
+                return "Error: For operation='insert' in boundary mode, start_line must equal end_line."
+            if op == "replace" and start_line == end_line:
+                return "Error: For operation='replace' in boundary mode, start_line must be less than end_line."
+            replaced = max(0, end_line - start_line)
+            note = " (file created)" if created_file else ""
+            return write_and_report(start_line, end_line, replaced, note)
 
-        removed = end_line - start_line
-        if removed == 0:
-            location = f"at boundary {start_line}"
-            action = "Inserted"
+        # Line-number mode (intuitive)
+        # Validate inputs for basic sanity (we allow 0 only for insert-at-beginning)
+        if start_line < 0 or end_line < 0:
+            return "Error: Line numbers must be non-negative. Use 0 only for insert at beginning."
+        if start_line > end_line:
+            return "Error: start_line cannot be greater than end_line."
+
+        # Determine operation if auto
+        if op == "auto":
+            op = "insert" if start_line == end_line else "replace"
+
+        if op == "replace":
+            if start_line < 1 or end_line < 1:
+                return "Error: For operation='replace' with indexing='line', lines must be >= 1."
+            if end_line > N:
+                return f"Error: end_line out of bounds. File has {N} line(s)."
+            # Convert line range [L1..L2] to boundary [L1-1 .. L2]
+            b_start = start_line - 1
+            b_end = end_line
+            replaced = end_line - start_line + 1
+            return write_and_report(b_start, b_end, replaced)
+
+        # op == 'insert'
+        # Determine target boundary from line number and position
+        if start_line == 0:  # insert at beginning
+            b = 0
         else:
-            location = f"between boundaries {start_line} and {end_line}"
-            action = f"Replaced {removed} line(s)"
-        note = " (file created)" if created_file else ""
-        return f"Success: {action} {location} in {file_path}.{note}"
+            # Allow N+1 as a synonym for append-at-end (after last line)
+            if start_line == N + 1:
+                b = N
+            else:
+                if start_line < 1 or start_line > N:
+                    return f"Error: Cannot insert relative to line {start_line}; file has {N} line(s)."
+                if pos == "after":
+                    b = start_line  # after line k -> boundary k
+                else:
+                    b = start_line - 1  # before line k -> boundary k-1
+        return write_and_report(b, b, 0)
+
     except Exception as e:
         return f"Error: {str(e)}"
