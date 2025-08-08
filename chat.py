@@ -183,18 +183,61 @@ def main():
                 script_to_run = user_input[2:].strip()
                 if script_to_run:
                     output = run_bash_script(script_to_run)
+                    # Sanitize output: strip ANSI escapes and control chars (keep \n, \t, \r)
+                    try:
+                        ansi_re = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+                        output_clean = ansi_re.sub("", output)
+                        output_clean = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", output_clean)
+                    except Exception:
+                        output_clean = output
+
+                    # Limit payload size to keep provider happy
+                    MAX_PREVIEW = 15000  # characters
+                    preview = output_clean
+                    saved_path = None
+                    if len(output_clean) > MAX_PREVIEW:
+                        # Save full output to an artifact file
+                        artifacts_dir = Path.cwd() / ".egg" / "artifacts"
+                        artifacts_dir.mkdir(parents=True, exist_ok=True)
+                        ts = int(time.time())
+                        fname = f"bash_output_{ts}.txt"
+                        fpath = artifacts_dir / fname
+                        try:
+                            fpath.write_text(output_clean, encoding="utf-8", newline="\n")
+                            saved_path = str(fpath.relative_to(Path.cwd()))
+                        except Exception:
+                            # Fallback to temp directory if current write fails
+                            try:
+                                tmp_dir = Path.cwd() / ".egg"
+                                tmp_dir.mkdir(parents=True, exist_ok=True)
+                                fpath = tmp_dir / fname
+                                fpath.write_text(output_clean, encoding="utf-8", newline="\n")
+                                saved_path = str(fpath.relative_to(Path.cwd()))
+                            except Exception:
+                                saved_path = None
+                        preview = output_clean[:MAX_PREVIEW] + "\n... [truncated]"
+
                     header = f"Local Command Output"
                     if client.borders_enabled:
-                        output_renderable = Text(output)
+                        output_renderable = Text(output_clean if saved_path is None else output_clean[:MAX_PREVIEW] + "\n... [truncated in display]")
                         console.print(Panel(output_renderable, title="[bold green]Local Command Output[/bold green]", border_style="green", box=client.boxStyle))
                     else:
                         console.print(f"--- {header} ---")
-                        console.print(Text(output))
+                        console.print(Text(output_clean if saved_path is None else preview))
+
+                    if saved_path:
+                        output_section_title = f"Output too long; saved to: {saved_path}"
+                    else:
+                        output_section_title = "Output:"
+
+                    # Build compact, safe context message with code fences
                     context_message = (
                         "User executed a local command.\n"
                         f"Command:\n```bash\n{script_to_run}\n```\n\n"
-                        f"Output:\n---\n{output}\n---"
+                        f"{output_section_title}\n"
+                        f"```text\n{preview}\n```"
                     )
+
                     # Append to transcript only; keep user's turn (no API call here)
                     client.messages.append({"role": "user", "content": context_message})
                 else:
