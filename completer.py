@@ -37,36 +37,60 @@ class PtkCompleter(Completer):
             return []
 
     def _model_suggestions(self, prefix: str):
-        """Suggest models grouped by provider, with support for provider:name and aliases, plus 'all:' catalogs."""
-        # 'all:' dynamic suggestions
+        """Suggest models grouped by provider, with support for provider:name and aliases, plus 'all:' catalogs.
+        Matches the user's input anywhere in the candidate (not just prefix). Normalizes punctuation and case so
+        middle-part hints like "gpt 3" will match "OpenAI GPT-3 OR".
+        """
+        # Keep existing all: handling
         if prefix.lower().startswith('all:'):
             for s in self.client.get_all_models_suggestions(prefix):
                 yield Completion(s, start_position=-len(prefix))
             return
-        # Gather provider-prefixed names and plain display names
+
+        def _normalize(s: str) -> str:
+            if not s:
+                return ""
+            # lower, replace non-alnum with spaces, collapse spaces
+            ns = re.sub(r"[^0-9a-z]+", " ", s.lower()).strip()
+            ns = re.sub(r"\s+", " ", ns)
+            return ns
+
+        pref_norm = _normalize(prefix)
+
+        # Gather display names and match if normalized prefix is a substring
         display_names = list(self.client.models_config.keys()) if getattr(self.client, 'models_config', None) else []
-        for name in sorted(display_names):
-            if name.lower().startswith(prefix.lower()):
-                yield Completion(name, start_position=-len(prefix))
-        # provider:name form
         seen = set()
+        for name in sorted(display_names):
+            if pref_norm == "" or pref_norm in _normalize(name):
+                if name not in seen:
+                    seen.add(name)
+                    yield Completion(name, start_position=-len(prefix))
+
+        # provider:name form and provider:alias suggestions
         for display, cfg in (self.client.models_config or {}).items():
             prov = cfg.get('provider', 'unknown')
             prov_pref = f"{prov}:{display}"
-            if prov_pref.lower().startswith(prefix.lower()) and prov_pref not in seen:
-                seen.add(prov_pref)
-                yield Completion(prov_pref, start_position=-len(prefix))
+            if pref_norm == "" or pref_norm in _normalize(prov_pref):
+                if prov_pref not in seen:
+                    seen.add(prov_pref)
+                    yield Completion(prov_pref, start_position=-len(prefix))
             # aliases
             for a in cfg.get('alias', []) or []:
+                if not isinstance(a, str):
+                    continue
                 prov_alias = f"{prov}:{a}"
-                if isinstance(a, str) and prov_alias.lower().startswith(prefix.lower()) and prov_alias not in seen:
-                    seen.add(prov_alias)
-                    yield Completion(prov_alias, start_position=-len(prefix))
-        # plain aliases
+                if pref_norm == "" or pref_norm in _normalize(prov_alias):
+                    if prov_alias not in seen:
+                        seen.add(prov_alias)
+                        yield Completion(prov_alias, start_position=-len(prefix))
+
+        # plain aliases (no provider prefix)
         for display, cfg in (self.client.models_config or {}).items():
             for a in cfg.get('alias', []) or []:
-                if isinstance(a, str) and a.lower().startswith(prefix.lower()):
-                    yield Completion(a, start_position=-len(prefix))
+                if isinstance(a, str) and (pref_norm == "" or pref_norm in _normalize(a)):
+                    if a not in seen:
+                        seen.add(a)
+                        yield Completion(a, start_position=-len(prefix))
 
     def get_completions(self, document: Document, complete_event) -> Iterable[Completion]:
         text = document.text_before_cursor
