@@ -178,7 +178,7 @@ def main():
                 continue
 
             elif user_input.startswith("b "):
-                # Do NOT add raw command to transcript; just run locally and send context-only
+                # Run locally and append the output as a user message, but DO NOT contact the API yet
                 console.print("\n[cyan]Executing local command...[/cyan]")
                 script_to_run = user_input[2:].strip()
                 if script_to_run:
@@ -195,8 +195,7 @@ def main():
                         f"Command:\n```bash\n{script_to_run}\n```\n\n"
                         f"Output:\n---\n{output}\n---"
                     )
-                    # Send to model without advancing the turn, and add durable breadcrumb
-                    client.send_context_only(context_message)
+                    # Append to transcript only; keep user's turn (no API call here)
                     client.messages.append({"role": "user", "content": context_message})
                 else:
                     console.print("[yellow]Empty bash command, skipping.[/yellow]")

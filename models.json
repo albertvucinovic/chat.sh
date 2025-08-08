@@ -1,4 +1,9 @@
 {
+   "Qwen3-Thinking OR": {
+      "provider": "openrouter",
+      "model_name": "qwen/qwen3-235b-a22b-thinking-2507",
+      "max_tokens": 250000
+   },
    "GPT 5": {
       "provider": "openai",
       "model_name": "gpt-5",
