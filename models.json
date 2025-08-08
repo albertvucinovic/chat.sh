@@ -1,137 +1,182 @@
 {
-   "Qwen3-Thinking OR": {
-      "provider": "openrouter",
-      "model_name": "qwen/qwen3-235b-a22b-thinking-2507",
-      "max_tokens": 250000
-   },
-   "GPT 5": {
-      "provider": "openai",
-      "model_name": "gpt-5",
-      "max_tokens": 400000
-   },
-   "GPT 5 Chat": {
-      "provider": "openai",
-      "model_name": "gpt-5-chat-latest",
-      "max_tokens": 400000
-   },
-   "GPT 5 Mini": {
-      "provider": "openai",
-      "model_name": "gpt-5-mini",
-      "max_tokens": 400000
-   },
-   "glm-4.5-air": {
-      "provider": "openrouter",
-      "model_name": "z-ai/glm-4.5-air",
-      "max_tokens": 250000
-   },
-   "openai 120B": {
-      "provider": "openrouter",
-      "model_name": "openai/gpt-oss-120b",
-      "max_tokens": 1000000
-   },
-   "Kimi K2 openrouter": {
-      "provider": "openrouter",
-      "model_name": "moonshotai/kimi-k2",
-      "max_tokens": 32000
-   },
-   "Horizon Beta": {
-      "provider": "openrouter",
-      "model_name": "openrouter/horizon-beta",
-      "max_tokens": 250000
-   },
-   "Horizon Alpha": {
-      "provider": "openrouter",
-      "model_name": "openrouter/horizon-alpha",
-      "max_tokens": 250000
-   },
-   "Qwen3 Coder Local": {
-      "provider": "local",
-      "model_name": "Qwen3-Coder-30B-A3B-Instruct-UD-Q8_K_XL.gguf",
-      "max_tokens": 250000
-   },
-   "Qwen3 Coder OR": {
-      "provider": "openrouter",
-      "model_name": "qwen/qwen3-coder:free",
-      "max_tokens": 250000
-   },
-   "Qwen3 30B Thinking 2507": {
-      "provider": "local",
-      "model_name": "../vllm/Models/Qwen/Qwen3-30B-A3B-Thinking-2507-UD-Q6_K_XL.gguf",
-      "max_tokens": 40000
-   },
-   "Qwen3 30B MoE 2507": {
-      "provider": "local",
-      "model_name": "../vllm/Models/Qwen/Qwen3-30B-A3B-Instruct-2507-UD-Q6_K_XL.gguf",
-      "max_tokens": 40000
-   },
-   "Qwen3 32B Q6": {
-      "provider": "local",
-      "model_name": "../vllm/Models/Qwen/Qwen3-32B-UD-Q6_K_XL.gguf",
-      "max_tokens": 40000
-   },
-   "Devstral 2507 QK_K": {
-      "provider": "local",
-      "model_name": "../vllm/Models/mistralai/Devstral-Small-2507-UD-QK_K.gguf",
-      "max_tokens": 40000
-   },
-   "Qwen 32B AWQ": {
-      "provider": "local",
-      "model_name": "Qwen/Qwen3-32B-AWQ",
-      "max_tokens": 32000
-   },
-   "R1 0528": {
-      "provider": "togetherai",
-      "model_name": "deepseek-ai/DeepSeek-R1",
-      "max_tokens": 128000
-   },
-   "Kimi K2 Groq": {
-      "provider": "groq",
-      "model_name": "moonshotai/kimi-k2-instruct",
-      "max_tokens": 128000
-   },
-   "Google Gemini 2.5 Flash": {
-      "provider": "google",
-      "model_name": "gemini-2.5-flash",
-      "max_tokens": 1000000
-   },
-   "Google Gemini 2.5 Pro": {
-      "provider": "google",
-      "model_name": "gemini-2.5-pro",
-      "max_tokens": 1000000
-   },
-   "OpenAI o3-mini": {
-      "provider": "openai",
-      "model_name": "o3-mini",
-      "max_tokens": 128000
-   },
-   "OpenAI GPT-4.1": {
-      "provider": "openai",
-      "model_name": "gpt-4.1",
-      "max_tokens": 128000
-   },
-   "OpenAI GPT-4o": {
-      "provider": "openai",
-      "model_name": "gpt-4o",
-      "max_tokens": 128000
-   },
-   "Anthropic Claude Haiku": {
-      "provider": "anthropic",
-      "model_name": "claude-3-haiku-20240307",
-      "max_tokens": 200000
-   },
-   "GPT 5 Nano": {
-      "provider": "openai",
-      "model_name": "gpt-5-nano",
-      "max_tokens": 32000
-   },
-   "OpenAI o3": {
-      "provider": "openrouter",
-      "model_name": "openai/o3",
-      "max_tokens": 128000
-   },
-   "Sonnet 4": {
-      "provider": "openrouter",
-      "model_name": "anthropic/claude-sonnet-4",
-      "max_tokens": 200000
-   }
+  "providers": {
+    "openai": {
+      "api_base": "https://api.openai.com/v1/chat/completions",
+      "api_key_env": "OPENAI_API_KEY",
+      "models": {
+        "GPT 5": {
+          "model_name": "gpt-5",
+          "max_tokens": 400000,
+          "alias": []
+        },
+        "GPT 5 Chat": {
+          "model_name": "gpt-5-chat-latest",
+          "max_tokens": 400000,
+          "alias": []
+        },
+        "GPT 5 Mini": {
+          "model_name": "gpt-5-mini",
+          "max_tokens": 400000,
+          "alias": []
+        },
+        "OpenAI o3-mini": {
+          "model_name": "o3-mini",
+          "max_tokens": 128000,
+          "alias": []
+        },
+        "OpenAI GPT-4.1": {
+          "model_name": "gpt-4.1",
+          "max_tokens": 128000,
+          "alias": []
+        },
+        "OpenAI GPT-4o": {
+          "model_name": "gpt-4o",
+          "max_tokens": 128000,
+          "alias": []
+        },
+        "GPT 5 Nano": {
+          "model_name": "gpt-5-nano",
+          "max_tokens": 32000,
+          "alias": []
+        }
+      }
+    },
+    "anthropic": {
+      "api_base": "https://api.anthropic.com/v1/messages",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "models": {
+        "Anthropic Claude Haiku": {
+          "model_name": "claude-3-haiku-20240307",
+          "max_tokens": 200000,
+          "alias": []
+        }
+      }
+    },
+    "google": {
+      "api_base": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "api_key_env": "GOOGLE_API_KEY",
+      "models": {
+        "Google Gemini 2.5 Flash": {
+          "model_name": "gemini-2.5-flash",
+          "max_tokens": 1000000,
+          "alias": []
+        },
+        "Google Gemini 2.5 Pro": {
+          "model_name": "gemini-2.5-pro",
+          "max_tokens": 1000000,
+          "alias": []
+        }
+      }
+    },
+    "local": {
+      "api_base": "http://localhost:10000/v1/chat/completions",
+      "api_key_env": "LOCAL_API_KEY",
+      "models": {
+        "Qwen3 Coder Local": {
+          "model_name": "Qwen3-Coder-30B-A3B-Instruct-UD-Q8_K_XL.gguf",
+          "max_tokens": 250000,
+          "alias": []
+        },
+        "Qwen3 30B Thinking 2507": {
+          "model_name": "../vllm/Models/Qwen/Qwen3-30B-A3B-Thinking-2507-UD-Q6_K_XL.gguf",
+          "max_tokens": 40000,
+          "alias": []
+        },
+        "Qwen3 30B MoE 2507": {
+          "model_name": "../vllm/Models/Qwen/Qwen3-30B-A3B-Instruct-2507-UD-Q6_K_XL.gguf",
+          "max_tokens": 40000,
+          "alias": []
+        },
+        "Qwen3 32B Q6": {
+          "model_name": "../vllm/Models/Qwen/Qwen3-32B-UD-Q6_K_XL.gguf",
+          "max_tokens": 40000,
+          "alias": []
+        },
+        "Devstral 2507 QK_K": {
+          "model_name": "../vllm/Models/mistralai/Devstral-Small-2507-UD-QK_K.gguf",
+          "max_tokens": 40000,
+          "alias": []
+        },
+        "Qwen 32B AWQ": {
+          "model_name": "Qwen/Qwen3-32B-AWQ",
+          "max_tokens": 32000,
+          "alias": []
+        }
+      }
+    },
+    "groq": {
+      "api_base": "https://api.groq.com/openai/v1/chat/completions",
+      "api_key_env": "GROQ_API_KEY",
+      "models": {
+        "Kimi K2 Groq": {
+          "model_name": "moonshotai/kimi-k2-instruct",
+          "max_tokens": 128000,
+          "alias": []
+        }
+      }
+    },
+    "togetherai": {
+      "api_base": "https://api.together.xyz/v1/chat/completions",
+      "api_key_env": "TOGETHERAI_API_KEY",
+      "models": {
+        "R1 0528": {
+          "model_name": "deepseek-ai/DeepSeek-R1",
+          "max_tokens": 128000,
+          "alias": []
+        }
+      }
+    },
+    "openrouter": {
+      "api_base": "https://openrouter.ai/api/v1/chat/completions",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "models": {
+        "Qwen3-Thinking OR": {
+          "model_name": "qwen/qwen3-235b-a22b-thinking-2507",
+          "max_tokens": 250000,
+          "alias": []
+        },
+        "glm-4.5-air": {
+          "model_name": "z-ai/glm-4.5-air",
+          "max_tokens": 250000,
+          "alias": []
+        },
+        "openai 120B": {
+          "model_name": "openai/gpt-oss-120b",
+          "max_tokens": 1000000,
+          "alias": []
+        },
+        "Kimi K2 openrouter": {
+          "model_name": "moonshotai/kimi-k2",
+          "max_tokens": 32000,
+          "alias": []
+        },
+        "Horizon Beta": {
+          "model_name": "openrouter/horizon-beta",
+          "max_tokens": 250000,
+          "alias": []
+        },
+        "Horizon Alpha": {
+          "model_name": "openrouter/horizon-alpha",
+          "max_tokens": 250000,
+          "alias": []
+        },
+        "Qwen3 Coder OR": {
+          "model_name": "qwen/qwen3-coder:free",
+          "max_tokens": 250000,
+          "alias": []
+        },
+        "OpenAI o3": {
+          "model_name": "openai/o3",
+          "max_tokens": 128000,
+          "alias": []
+        },
+        "Sonnet 4": {
+          "model_name": "anthropic/claude-sonnet-4",
+          "max_tokens": 200000,
+          "alias": []
+        }
+      }
+    }
+  },
+  "default_model": "Qwen3 Coder Local"
 }
