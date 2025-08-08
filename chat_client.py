@@ -605,7 +605,9 @@ class ChatClient:
         if not chat_file:
             self.console.print(f"[bold red]Error: Chat file for '{chat_name}' not found.[/bold red]")
             return
-
+        if sanitized_msg.get("role") == "assistant" and "tool_calls" in sanitized_msg:
+            if not sanitized_msg["tool_calls"]:
+                sanitized_msg["tool_calls"] = []
         try:
             with open(chat_file, "r") as f: loaded_messages = json.load(f)
             self._clear_display()
