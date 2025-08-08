@@ -491,12 +491,26 @@ class DisplayManager:
                 sess.append(content)
                 enq_order.append(sid)
             if buffers and buffers.get("tool_calls_buf"):
-                items = buffers["tool_calls_buf"].items() if isinstance(buffers["tool_calls_buf"], dict) else enumerate(buffers["tool_calls_buf"]) 
-                for idx, tc in items:
+                buf = buffers.get("tool_calls_buf")
+                list_items = []
+                # Normalize buffer entries into a list of (key_str, tc) where key_str is a stable identifier
+                if isinstance(buf, dict):
+                    for i, (k, v) in enumerate(buf.items()):
+                        if k is None:
+                            key_str = (v.get("id") if isinstance(v, dict) else None) or str(i)
+                        else:
+                            key_str = str(k)
+                        list_items.append((key_str, v))
+                else:
+                    for i, v in enumerate(buf):
+                        key_str = (v.get("id") if isinstance(v, dict) else None) or str(i)
+                        list_items.append((key_str, v))
+
+                for idx, tc in list_items:
                     func = tc.get("function", {})
                     name = func.get("name", "") or ""
                     args_str = func.get("arguments", "") or ""
-                    sid = f"tool:{int(idx)}"
+                    sid = f"tool:{idx}"
                     title = f"Tool Call: {name}" if name else "Tool Call"
                     sess = self._ensure_session(sid, title)
                     if not sess.box.started and name:
