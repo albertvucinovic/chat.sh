@@ -223,9 +223,6 @@ def replace_lines(file_path: str, start_line: int, end_line: int | None = None, 
             end_line = start_line
         if end_line < start_line:
             return "Error: end_line cannot be less than start_line."
-        if end_line > N:
-            return f"Error: end_line out of bounds. File has {N} line(s)."
-
         # Convert to 0-based indices
         s_idx = start_line - 1
         e_idx = end_line      # slice end is exclusive
