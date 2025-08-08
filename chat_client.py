@@ -334,6 +334,8 @@ class ChatClient:
             self.console.print(f"[bold red]Error: Provider '{provider_name}' not found.[/bold red]")
             return
         self.base_url = provider_config.get("api_base")
+        # remember provider name for heuristics elsewhere
+        self.provider_name = provider_name
         api_key_env = provider_config.get("api_key_env")
         if api_key_env and (api_key := os.environ.get(api_key_env)):
             self.headers["Authorization"] = f"Bearer {api_key}"
@@ -467,13 +469,24 @@ class ChatClient:
                     if reason := delta.get("reasoning_content"): reasoning_parts.append(reason)
                     if tc_chunk := delta.get("tool_calls"):
                         for tc_delta in tc_chunk:
-                            idx = tc_delta.get("index")
+                            raw_idx = tc_delta.get("index")
+                            idx = raw_idx
+                            # If index is None, pick next available integer index to avoid collisions
+                            if idx is None:
+                                next_i = 0
+                                while next_i in tool_calls_buf:
+                                    next_i += 1
+                                idx = next_i
+                            # ensure an entry exists
                             if idx not in tool_calls_buf:
                                 tool_calls_buf[idx] = {"id": f"call_{uuid.uuid4().hex[:10]}", "type": "function", "function": {"name": "", "arguments": ""}}
-                            if tc_delta.get("id"): tool_calls_buf[idx]["id"] = tc_delta["id"]
+                            if tc_delta.get("id"):
+                                tool_calls_buf[idx]["id"] = tc_delta["id"]
                             if f_delta := tc_delta.get("function"):
-                                if n := f_delta.get("name"): tool_calls_buf[idx]["function"]["name"] += n
-                                if a := f_delta.get("arguments"): tool_calls_buf[idx]["function"]["arguments"] += a
+                                if n := f_delta.get("name"):
+                                    tool_calls_buf[idx]["function"]["name"] += n
+                                if a := f_delta.get("arguments"):
+                                    tool_calls_buf[idx]["function"]["arguments"] += a
                     
                     # Update display per delta
                     self.display_manager.stream_chunk(

@@ -4,6 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
+import ast
 
 from executors import run_bash_script, run_python_script, str_replace_editor, replace_lines
 
@@ -416,22 +417,99 @@ def parse_tool_calls_from_content(message_content: str) -> list:
 
 def handle_tool_call(client, call: Dict, display_call: bool = True):
     fn_name = call["function"]["name"]
-    try:
-        args_raw = call["function"].get("arguments", "{}")
-        args = json.loads(args_raw or "{}") if isinstance(args_raw, str) else (args_raw or {})
-    except json.JSONDecodeError:
-        tool_msg = {"role": "tool", "name": fn_name, "tool_call_id": call["id"], "content": "Error: Invalid arguments."}
+    # Parse arguments robustly. Accept either a single JSON object, a Python-dict-like object, or
+    # multiple JSON objects concatenated (as some providers stream multiple tool invocations without separators).
+    args_raw = call["function"].get("arguments", "{}")
+
+    def _split_json_objects(s: str):
+        objs = []
+        if not isinstance(s, str) or not s:
+            return objs
+        i = 0
+        L = len(s)
+        while True:
+            # find next opening brace
+            start = s.find('{', i)
+            if start == -1:
+                break
+            depth = 0
+            j = start
+            while j < L:
+                if s[j] == '{':
+                    depth += 1
+                elif s[j] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        j += 1
+                        break
+                j += 1
+            if depth == 0:
+                objs.append(s[start:j])
+                i = j
+            else:
+                break
+        return objs
+
+    parsed_args_list = []
+    args_is_str = isinstance(args_raw, str)
+    if args_is_str:
+        # 1) Try direct JSON
+        try:
+            parsed = json.loads(args_raw or "{}")
+            # If it's a list, flatten it
+            if isinstance(parsed, list):
+                parsed_args_list = parsed
+            else:
+                parsed_args_list = [parsed]
+        except Exception:
+            # 2) Try to repair common concatenated-JSON case by inserting commas between adjacent objects
+            try:
+                repaired = re.sub(r"}\s*{", "},{", args_raw.strip())
+                wrapped = f"[{repaired}]"
+                parsed = json.loads(wrapped)
+                parsed_args_list = parsed if isinstance(parsed, list) else [parsed]
+            except Exception:
+                # 3) Try Python literal eval for Python-style dicts
+                try:
+                    parsed_py = ast.literal_eval(args_raw)
+                    if isinstance(parsed_py, dict):
+                        parsed_args_list = [parsed_py]
+                    elif isinstance(parsed_py, (list, tuple)):
+                        parsed_args_list = list(parsed_py)
+                except Exception:
+                    # 4) Fallback: brute-force split objects by brace matching
+                    pieces = _split_json_objects(args_raw)
+                    for p in pieces:
+                        try:
+                            parsed_args_list.append(json.loads(p))
+                        except Exception:
+                            # skip unparseable fragments
+                            continue
+    else:
+        # args_raw already a dict-like
+        parsed_args_list = [args_raw or {}]
+
+    if not parsed_args_list:
+        tool_msg = {"role": "tool", "name": fn_name, "tool_call_id": call.get("id"), "content": "Error: Invalid arguments."}
         client.messages.append(tool_msg)
         client.display_manager.render_message(tool_msg)
         return
 
+    # Display the call(s)
     if display_call:
-        client.console.print(json.dumps({"tool": fn_name, "args": args}, indent=2))
+        try:
+            if len(parsed_args_list) == 1:
+                client.console.print(json.dumps({"tool": fn_name, "args": parsed_args_list[0]}, indent=2))
+            else:
+                client.console.print(json.dumps({"tool": fn_name, "args": parsed_args_list}, indent=2))
+        except Exception:
+            pass
 
+    # Ask confirmation once for multiple invocations unless auto-approved
     execute = True if (client.in_single_turn_auto_execute_calls or client.yesToolFlag) else None
     if execute is None:
         while True:
-            response = input(f"Execute the {fn_name} tool call? [y/n/a] ").strip().lower()
+            response = input(f"Execute the {fn_name} tool call(s)? [y/n/a] ").strip().lower()
             if response in ('y', 'n', 'a'):
                 break
             print("Invalid input. Please enter y, n, or a")
@@ -443,36 +521,93 @@ def handle_tool_call(client, call: Dict, display_call: bool = True):
         else:
             execute = False
 
+    outputs = []
     if not execute:
-        output = "--- SKIPPED BY USER ---"
+        outputs = ["--- SKIPPED BY USER ---"] * len(parsed_args_list)
     else:
-        if fn_name == "bash":
-            output = run_bash_script(args.get("script", ""))
-        elif fn_name == "python":
-            output = run_python_script(args.get("script", ""))
-        elif fn_name == "popContext":
-            output = client.pop_context(args.get("return_value", ""))
-        elif fn_name == "str_replace_editor":
-            output = str_replace_editor(args.get("file_path"), args.get("old_str"), args.get("new_str"))
-        elif fn_name == "replace_lines":
-            output = replace_lines(args.get("file_path"), args.get("start_line"), args.get("end_line"), args.get("new_content"))
-        elif fn_name == "spawn_agent":
-            output = tool_spawn_agent(args)
-        elif fn_name == "wait_agents":
+        # If there are multiple parsed arg objects, try to infer if the function name string actually
+        # encodes multiple concatenated tool names (common when streaming merges names). If so, split
+        # the function name into a sequence to run one-by-one.
+        names_seq = [fn_name]
+        if len(parsed_args_list) > 1:
+            # Gather known tool names
+            known_tools = [t["function"]["name"] for t in TOOLS]
+            # Fast check: repeated same tool name
+            for kt in known_tools:
+                if kt * len(parsed_args_list) == fn_name:
+                    names_seq = [kt] * len(parsed_args_list)
+                    break
+            else:
+                # Greedy scan: match longest known tool names repeatedly
+                sorted_known = sorted(known_tools, key=lambda x: -len(x))
+                seq = []
+                s = fn_name
+                idx_ptr = 0
+                while s:
+                    matched = False
+                    for kt in sorted_known:
+                        if s.startswith(kt):
+                            seq.append(kt)
+                            s = s[len(kt):]
+                            matched = True
+                            break
+                    if not matched:
+                        # cannot tokenize further
+                        break
+                if len(seq) == len(parsed_args_list):
+                    names_seq = seq
+        # Ensure names_seq length matches parsed args; attempt heuristics if mismatch
+        if len(names_seq) != len(parsed_args_list):
+            # Heuristic: if parsed args look like spawn_agent payloads, map to spawn_agent/_auto
             try:
-                output = tool_wait_agents(args)
-            except KeyboardInterrupt:
-                output = json.dumps({"interrupted": True, "message": "wait_agents interrupted by user"}, indent=2)
-        elif fn_name == "write_result":
-            output = tool_write_result(args)
-        elif fn_name == "list_agents":
-            output = tool_list_agents(args)
-        elif fn_name == "spawn_agent_auto":
-            output = tool_spawn_agent_auto(args)
-        else:
-            output = f"Unknown tool: {fn_name}"
+                all_have_ctx = all(isinstance(a, dict) and 'context_text' in a for a in parsed_args_list)
+            except Exception:
+                all_have_ctx = False
+            if all_have_ctx:
+                chosen = 'spawn_agent_auto' if 'auto' in fn_name.lower() else 'spawn_agent'
+                names_seq = [chosen] * len(parsed_args_list)
+            else:
+                names_seq = [fn_name] * len(parsed_args_list)
 
-    tool_msg = {"role": "tool", "name": fn_name, "tool_call_id": call["id"], "content": output}
+        for i, args in enumerate(parsed_args_list):
+            cur_name = names_seq[i]
+            try:
+                if cur_name == "bash":
+                    out = run_bash_script(args.get("script", ""))
+                elif cur_name == "python":
+                    out = run_python_script(args.get("script", ""))
+                elif cur_name == "popContext":
+                    out = client.pop_context(args.get("return_value", ""))
+                elif cur_name == "str_replace_editor":
+                    out = str_replace_editor(args.get("file_path"), args.get("old_str"), args.get("new_str"))
+                elif cur_name == "replace_lines":
+                    out = replace_lines(args.get("file_path"), args.get("start_line"), args.get("end_line"), args.get("new_content"))
+                elif cur_name == "spawn_agent":
+                    out = tool_spawn_agent(args)
+                elif cur_name == "wait_agents":
+                    try:
+                        out = tool_wait_agents(args)
+                    except KeyboardInterrupt:
+                        out = json.dumps({"interrupted": True, "message": "wait_agents interrupted by user"}, indent=2)
+                elif cur_name == "write_result":
+                    out = tool_write_result(args)
+                elif cur_name == "list_agents":
+                    out = tool_list_agents(args)
+                elif cur_name == "spawn_agent_auto":
+                    out = tool_spawn_agent_auto(args)
+                else:
+                    out = f"Unknown tool: {cur_name}"
+            except Exception as e:
+                out = f"Error executing {cur_name}: {e}"
+            outputs.append(out)
+
+    # Aggregate outputs into a single tool message for display and transcript
+    if len(outputs) == 1:
+        final_output = outputs[0]
+    else:
+        final_output = "\n\n==== SPLIT RESULTS ===\n\n".join(outputs)
+
+    tool_msg = {"role": "tool", "name": fn_name, "tool_call_id": call.get("id"), "content": final_output}
     client.messages.append(tool_msg)
     client.display_manager.render_message(tool_msg)
 
