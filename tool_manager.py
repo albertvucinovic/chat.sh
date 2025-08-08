@@ -16,7 +16,7 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"return_value": {"type": "string"}}, "required": ["return_value"]}}},
     {"type": "function", "function": {"name": "str_replace_editor", "description": "Replace specific text in files (exact literal match, including whitespace).",
         "parameters": {"type": "object", "properties": {"file_path": {"type": "string"}, "old_str": {"type": "string"}, "new_str": {"type": "string"}}, "required": ["file_path", "old_str", "new_str"]}}},
-    {"type": "function", "function": {"name": "replace_lines", "description": "Replaces a specified range of lines in a file with new content.",
+    {"type": "function", "function": {"name": "replace_lines", "description": "Boundary-based line edit: boundaries are 0..N (N = number of lines). If start_line == end_line, insert at that boundary (e.g., (0,0) at beginning, (1,1) between line 1 and 2, (N,N) append). If start_line < end_line, replace lines [start_line+1..end_line] (e.g., (0,1) replace first line, (1,3) replace lines 2..3).",
         "parameters": {"type": "object", "properties": {"file_path": {"type": "string"}, "start_line": {"type": "integer"}, "end_line": {"type": "integer"}, "new_content": {"type": "string"}}, "required": ["file_path", "start_line", "end_line", "new_content"]}}},
     {"type": "function", "function": {"name": "spawn_agent", "description": "Spawn a single child agent using current CWD as working dir. Returns {tree_id,parent_id,child_id,dir,session}.",
         "parameters": {"type": "object", "properties": {"context_text": {"type": "string"}, "label": {"type": "string"}}, "required": ["context_text"]}}},

@@ -142,35 +142,70 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str) -> str:
         return f"Error: {str(e)}"
 
 def replace_lines(file_path: str, start_line: int, end_line: int, new_content: str) -> str:
-    """Replaces a specified range of lines in a file with new content."""
+    """Boundary-based replace/insert for text files.
+
+    Semantics:
+    - start_line and end_line are boundary indexes in [0..N], where N = number of lines in the file.
+      Boundary 0 = before the first line.
+      Boundary 1 = after line 1 (between line 1 and 2).
+      ... up to N = after the last line.
+    - If start_line == end_line: INSERT new_content at that boundary (no lines removed).
+      Examples: (0,0) insert at beginning; (1,1) insert between line 1 and 2; (N,N) append at end.
+    - If start_line < end_line: REPLACE the block of lines between the boundaries:
+      Lines with 1-based indexes in [start_line+1 .. end_line] are replaced.
+      Examples: (0,1) replaces line 1; (1,3) replaces lines 2..3.
+
+    Validation:
+    - 0 <= start_line <= end_line <= N, where N is computed from the current file (0 for empty).
+    - If the file does not exist and both boundaries are 0, the file will be created with new_content.
+      Otherwise, a missing file is an error.
+    """
     try:
         abs_path = Path(file_path).resolve()
-        
-        # Basic validation for line numbers
-        if start_line <= 0 or end_line <= 0:
-            return "Error: Line numbers must be positive."
+
+        created_file = False
+        # Read file if it exists; otherwise allow creation for (0,0)
+        if not abs_path.exists():
+            if start_line == 0 and end_line == 0:
+                lines = []
+                created_file = True
+            else:
+                return f"Error: File not found at {file_path}"
+        else:
+            with open(abs_path, 'r', newline='') as f:
+                content = f.read()
+            lines = content.splitlines(keepends=True)
+
+        N = len(lines)
+
+        # Validate boundaries
+        if start_line < 0 or end_line < 0:
+            return "Error: Line boundaries must be non-negative (0..N)."
         if start_line > end_line:
             return "Error: start_line cannot be greater than end_line."
+        if start_line > N or end_line > N:
+            return f"Error: boundary out of bounds. File has {N} line(s); valid boundaries are 0..{N}."
 
-        with open(abs_path, 'r', newline='') as f:
-            lines = f.readlines()
-        
-        # Adjust for 0-indexed list
-        start_idx = start_line - 1
-        end_idx = end_line - 1
+        # Build inserted segment using \n endings (keeps tool behavior consistent)
+        insert_segment = []
+        if new_content:
+            insert_segment = [line + '\n' for line in new_content.splitlines()]
 
-        if start_idx >= len(lines) or end_idx < 0:
-            return f"Error: Line range [{start_line}-{end_line}] is out of bounds for file with {len(lines)} lines."
+        # Splice using boundary indices (remove lines [start_line, end_line))
+        new_lines = lines[:start_line] + insert_segment + lines[end_line:]
 
-        # Replace the lines
-        new_lines = lines[:start_idx] + [line + '\n' for line in new_content.splitlines()] + lines[end_idx + 1:]
-        
+        abs_path.parent.mkdir(parents=True, exist_ok=True)
         with open(abs_path, 'w', newline='') as f:
             f.writelines(new_lines)
-            
-        return f"Successfully replaced lines {start_line}-{end_line} in {file_path}."
-    except FileNotFoundError:
-        return f"Error: File not found at {file_path}"
+
+        removed = end_line - start_line
+        if removed == 0:
+            location = f"at boundary {start_line}"
+            action = "Inserted"
+        else:
+            location = f"between boundaries {start_line} and {end_line}"
+            action = f"Replaced {removed} line(s)"
+        note = " (file created)" if created_file else ""
+        return f"Success: {action} {location} in {file_path}.{note}"
     except Exception as e:
         return f"Error: {str(e)}"
-
