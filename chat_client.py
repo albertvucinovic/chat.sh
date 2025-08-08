@@ -48,7 +48,7 @@ class ChatClient:
         self.borders_enabled = False
         self.chat_dir = Path.cwd() / ".egg/localChats"
         self.chat_dir.mkdir(parents=True, exist_ok=True)
-        self.current_model_key = os.environ.get("DEFAULT_MODEL", "OpenAI GPT-4o")
+        self.current_model_key = None
         self.base_url = None
         self.models_config, self.providers_config = load_configs()
         self.short_recap: Optional[str] = None
@@ -84,10 +84,23 @@ class ChatClient:
         if not self.models_config:
             self.console.print("[bold red]Fatal: No models configured in models.json.[/bold red]")
             sys.exit(1)
-        if self.current_model_key not in self.models_config:
-            self.console.print(f"[bold yellow]Warning: Initial model '{self.current_model_key}' not found. Using first available.[/bold yellow]")
+
+        # Determine initial model from env or config meta
+        default_model_env = os.environ.get("DEFAULT_MODEL")
+        default_from_config = None
+        try:
+            meta = self.providers_config.get("_meta", {}) if isinstance(self.providers_config, dict) else {}
+            if isinstance(meta, dict):
+                default_from_config = meta.get("default_model")
+        except Exception:
+            pass
+        self.current_model_key = default_model_env or default_from_config
+        if not self.current_model_key or self.current_model_key not in self.models_config:
+            # Pick the first available model as a fallback
             self.current_model_key = list(self.models_config.keys())[0]
-        
+            if default_model_env or default_from_config:
+                self.console.print(f"[bold yellow]Warning: Initial model '{default_model_env or default_from_config}' not found. Using '{self.current_model_key}'.[/bold yellow]")
+
         self.switch_model(self.current_model_key, initial_setup=True)
 
     def _build_system_prompt(self) -> str:
@@ -188,8 +201,11 @@ class ChatClient:
 
     def _update_provider_and_url(self):
         model_config = self.models_config.get(self.current_model_key)
+        if not model_config:
+            self.console.print(f"[bold red]Error: Model config for '{self.current_model_key}' not found.[/bold red]")
+            return
         provider_name = model_config.get("provider")
-        provider_config = self.providers_config.get(provider_name)
+        provider_config = self.providers_config.get(provider_name) if isinstance(self.providers_config, dict) else None
         if not provider_config:
             self.console.print(f"[bold red]Error: Provider '{provider_name}' not found.[/bold red]")
             return
@@ -207,12 +223,43 @@ class ChatClient:
             self._initialize_system_prompt()
             return
         if not model_key:
-            self.console.print("[bold]Available models:[/bold]\n" + "\n".join(f"- {name}" for name in self.models_config))
+            # Pretty print available models grouped by provider
+            by_provider: Dict[str, List[str]] = {}
+            for name, cfg in self.models_config.items():
+                by_provider.setdefault(cfg.get("provider", "unknown"), []).append(name)
+            lines = []
+            for prov in sorted(by_provider.keys()):
+                lines.append(f"{prov}:")
+                for m in sorted(by_provider[prov]):
+                    lines.append(f"  - {m}")
+            self.console.print("[bold]Available models (by provider):[/bold]\n" + "\n".join(lines))
             return
-        if model_key not in self.models_config:
+        # Resolve by exact name or alias
+        resolved = None
+        if model_key in self.models_config:
+            resolved = model_key
+        else:
+            # Search aliases (case-insensitive)
+            lk = model_key.lower()
+            for display, cfg in self.models_config.items():
+                aliases = [a.lower() for a in cfg.get("alias", [])]
+                if lk in aliases:
+                    resolved = display
+                    break
+        if not resolved:
+            # Try provider-prefixed form: provider:name
+            if ":" in model_key:
+                prov, name = model_key.split(":", 1)
+                for display, cfg in self.models_config.items():
+                    if cfg.get("provider") == prov and (display == name or name.lower() in [a.lower() for a in cfg.get("alias", [])]):
+                        resolved = display
+                        break
+        if not resolved:
             self.console.print(f"[bold red]Unknown model: '{model_key}'[/bold red]")
+            # provide suggestions
+            self.console.print("[bold]Tip:[/bold] Use /model to list grouped models, or specify provider:name. Aliases are supported.")
             return
-        self.current_model_key = model_key
+        self.current_model_key = resolved
         self._update_provider_and_url()
         self.console.print(f"[bold green]Switched to model: '{self.current_model_key}'[/bold green]")
 

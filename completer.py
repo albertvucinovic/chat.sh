@@ -36,6 +36,33 @@ class PtkCompleter(Completer):
         except (OSError, PermissionError):
             return []
 
+    def _model_suggestions(self, prefix: str):
+        """Suggest models grouped by provider, with support for provider:name and aliases."""
+        # Gather provider-prefixed names and plain display names
+        display_names = list(self.client.models_config.keys()) if getattr(self.client, 'models_config', None) else []
+        for name in sorted(display_names):
+            if name.lower().startswith(prefix.lower()):
+                yield Completion(name, start_position=-len(prefix))
+        # provider:name form
+        seen = set()
+        for display, cfg in (self.client.models_config or {}).items():
+            prov = cfg.get('provider', 'unknown')
+            prov_pref = f"{prov}:{display}"
+            if prov_pref.lower().startswith(prefix.lower()) and prov_pref not in seen:
+                seen.add(prov_pref)
+                yield Completion(prov_pref, start_position=-len(prefix))
+            # aliases
+            for a in cfg.get('alias', []) or []:
+                prov_alias = f"{prov}:{a}"
+                if isinstance(a, str) and prov_alias.lower().startswith(prefix.lower()) and prov_alias not in seen:
+                    seen.add(prov_alias)
+                    yield Completion(prov_alias, start_position=-len(prefix))
+        # plain aliases
+        for display, cfg in (self.client.models_config or {}).items():
+            for a in cfg.get('alias', []) or []:
+                if isinstance(a, str) and a.lower().startswith(prefix.lower()):
+                    yield Completion(a, start_position=-len(prefix))
+
     def get_completions(self, document: Document, complete_event) -> Iterable[Completion]:
         text = document.text_before_cursor
         words = text.split(' ')
@@ -68,10 +95,9 @@ class PtkCompleter(Completer):
 
         elif text.startswith("/model "):
             prefix = text[len("/model "):]
-            if self.client.models_config:
-                for name in self.client.models_config.keys():
-                    if name.startswith(prefix):
-                        yield Completion(name, start_position=-len(prefix))
+            # Provide rich suggestions: display, provider:name, aliases
+            for c in self._model_suggestions(prefix):
+                yield c
             return
 
         elif text.startswith("/spawn_auto"):
