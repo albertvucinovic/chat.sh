@@ -39,34 +39,47 @@ class PtkCompleter(Completer):
     def _model_suggestions(self, prefix: str):
         """Suggest models grouped by provider, with support for provider:name and aliases, plus 'all:' catalogs.
         Matches the user's input anywhere in the candidate (not just prefix). Normalizes punctuation and case so
-        middle-part hints like "gpt 3" will match "OpenAI GPT-3 OR".
+        middle-part hints like "gpt 3" will match "OpenAI GPT-3 OR". Also applies substring matching for all: catalogs
+        even when the user doesn't type the all: prefix (so 'llama' can match 'all:togetherai:meta-llama/...').
         """
-        # Keep existing all: handling
-        if prefix.lower().startswith('all:'):
-            for s in self.client.get_all_models_suggestions(prefix):
-                yield Completion(s, start_position=-len(prefix))
-            return
-
         def _normalize(s: str) -> str:
             if not s:
                 return ""
-            # lower, replace non-alnum with spaces, collapse spaces
             ns = re.sub(r"[^0-9a-z]+", " ", s.lower()).strip()
             ns = re.sub(r"\s+", " ", ns)
             return ns
 
+        seen = set()
         pref_norm = _normalize(prefix)
 
-        # Gather display names and match if normalized prefix is a substring
+        # If user is explicitly using all: handle provider or model completion
+        if prefix.lower().startswith('all:'):
+            rest = prefix[4:]
+            # No provider yet: delegate to helper to suggest providers
+            if ':' not in rest:
+                for s in self.client.get_all_models_suggestions(prefix):
+                    yield Completion(s, start_position=-len(prefix))
+                return
+            prov, partial = rest.split(':', 1)
+            mids = self.client.get_all_models_for_provider(prov) or []
+            part_norm = _normalize(partial)
+            for mid in mids:
+                cand = f"all:{prov}:{mid}"
+                if part_norm == "" or part_norm in _normalize(mid) or part_norm in _normalize(cand):
+                    if cand not in seen:
+                        seen.add(cand)
+                        yield Completion(cand, start_position=-len(prefix))
+            return
+
+        # Match standard configured models (models.json)
         display_names = list(self.client.models_config.keys()) if getattr(self.client, 'models_config', None) else []
-        seen = set()
         for name in sorted(display_names):
             if pref_norm == "" or pref_norm in _normalize(name):
                 if name not in seen:
                     seen.add(name)
                     yield Completion(name, start_position=-len(prefix))
 
-        # provider:name form and provider:alias suggestions
+        # provider:name and provider:alias forms
         for display, cfg in (self.client.models_config or {}).items():
             prov = cfg.get('provider', 'unknown')
             prov_pref = f"{prov}:{display}"
@@ -74,7 +87,6 @@ class PtkCompleter(Completer):
                 if prov_pref not in seen:
                     seen.add(prov_pref)
                     yield Completion(prov_pref, start_position=-len(prefix))
-            # aliases
             for a in cfg.get('alias', []) or []:
                 if not isinstance(a, str):
                     continue
@@ -84,13 +96,31 @@ class PtkCompleter(Completer):
                         seen.add(prov_alias)
                         yield Completion(prov_alias, start_position=-len(prefix))
 
-        # plain aliases (no provider prefix)
+        # plain aliases
         for display, cfg in (self.client.models_config or {}).items():
             for a in cfg.get('alias', []) or []:
                 if isinstance(a, str) and (pref_norm == "" or pref_norm in _normalize(a)):
                     if a not in seen:
                         seen.add(a)
                         yield Completion(a, start_position=-len(prefix))
+
+        # Additionally, search cached provider-wide catalogs (all-models cache) so simple fragments like
+        # 'llama' will surface provider-specific model ids as 'all:provider:model-id'
+        if pref_norm:
+            try:
+                providers = self.client.get_providers() or []
+                for prov in providers:
+                    mids = self.client.get_all_models_for_provider(prov) or []
+                    for mid in mids:
+                        cand = f"all:{prov}:{mid}"
+                        if cand in seen:
+                            continue
+                        # Match against the model id and a more humanized form (split slashes and dashes)
+                        if pref_norm in _normalize(mid) or pref_norm in _normalize(cand):
+                            seen.add(cand)
+                            yield Completion(cand, start_position=-len(prefix))
+            except Exception:
+                pass
 
     def get_completions(self, document: Document, complete_event) -> Iterable[Completion]:
         text = document.text_before_cursor
