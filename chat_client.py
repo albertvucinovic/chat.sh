@@ -5,8 +5,9 @@ import datetime
 import re
 import requests
 import uuid
+import time
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 import tiktoken
 from rich.console import Console
@@ -101,7 +102,130 @@ class ChatClient:
             if default_model_env or default_from_config:
                 self.console.print(f"[bold yellow]Warning: Initial model '{default_model_env or default_from_config}' not found. Using '{self.current_model_key}'.[/bold yellow]")
 
+        # Load all-models.json for dynamic provider-wide suggestions
+        self._all_models_cache: Dict[str, Dict[str, Any]] = self._load_all_models()
+
         self.switch_model(self.current_model_key, initial_setup=True)
+
+    def _all_models_path(self) -> Path:
+        return Path(__file__).resolve().parent / "all-models.json"
+
+    def _load_all_models(self) -> Dict[str, Dict[str, Any]]:
+        p = self._all_models_path()
+        if not p.exists():
+            return {}
+        try:
+            with open(p, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict) and 'providers' in data:
+                return data['providers']
+        except Exception:
+            pass
+        return {}
+
+    def _save_all_models(self, providers_map: Dict[str, Dict[str, Any]]):
+        out = {"providers": providers_map}
+        p = self._all_models_path()
+        try:
+            with open(p, 'w', encoding='utf-8') as f:
+                json.dump(out, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            self.console.print(f"[red]Failed to write all-models.json: {e}[/red]")
+
+    def get_providers(self) -> List[str]:
+        return list(self.providers_config.keys()) if isinstance(self.providers_config, dict) else []
+
+    def get_all_models_for_provider(self, provider: str) -> List[str]:
+        prov = self._all_models_cache.get(provider) or {}
+        models = prov.get('models')
+        if isinstance(models, list):
+            # allow either list of strings or list of dicts with id
+            ids: List[str] = []
+            for m in models:
+                if isinstance(m, str):
+                    ids.append(m)
+                elif isinstance(m, dict) and m.get('id'):
+                    ids.append(str(m['id']))
+            return ids
+        return []
+
+    def get_all_models_suggestions(self, prefix: str) -> List[str]:
+        # prefix starts with 'all:'
+        base = 'all:'
+        rest = prefix[len(base):]
+        out: List[str] = []
+        if ':' not in rest:
+            # suggest providers
+            for prov in sorted(self.get_providers()):
+                cand = f"all:{prov}:"
+                if cand.lower().startswith(prefix.lower()):
+                    out.append(cand)
+        else:
+            prov, partial = rest.split(':', 1)
+            for mid in self.get_all_models_for_provider(prov):
+                cand = f"all:{prov}:{mid}"
+                if cand.lower().startswith(prefix.lower()):
+                    out.append(cand)
+        return out
+
+    def update_all_models(self, provider: str) -> str:
+        if not provider:
+            return "Error: provider not specified."
+        prov_cfg = self.providers_config.get(provider) if isinstance(self.providers_config, dict) else None
+        if not isinstance(prov_cfg, dict):
+            return f"Error: Unknown provider '{provider}'."
+        api_base = str(prov_cfg.get('api_base') or '')
+        key_env = prov_cfg.get('api_key_env')
+        api_key = os.environ.get(key_env) if key_env else None
+        if not api_base:
+            return f"Error: Provider '{provider}' is missing api_base in models.json."
+        # Heuristically form models endpoint for OpenAI-compatible APIs
+        models_url = api_base.rstrip('/')
+        # replace known paths
+        for seg in ("/chat/completions", "/completions", "/responses"):
+            if models_url.endswith(seg):
+                models_url = models_url[: -len(seg)]
+                break
+        if not models_url.endswith('/models'):
+            models_url = models_url + '/models'
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        try:
+            resp = requests.get(models_url, headers=headers, timeout=30)
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            return f"Error: Failed to fetch models from {provider}: {e}"
+        try:
+            data = resp.json()
+        except Exception as e:
+            return f"Error: Non-JSON response from {provider}: {e}"
+        # Parse results
+        model_ids: List[str] = []
+        if isinstance(data, dict):
+            # OpenAI-compatible: { data: [ {id: ...}, ... ] }
+            items = data.get('data')
+            if isinstance(items, list):
+                for it in items:
+                    if isinstance(it, dict) and it.get('id'):
+                        model_ids.append(str(it['id']))
+        # Fallback for direct lists
+        if not model_ids and isinstance(data, list):
+            for it in data:
+                if isinstance(it, dict) and it.get('id'):
+                    model_ids.append(str(it['id']))
+                elif isinstance(it, str):
+                    model_ids.append(it)
+        if not model_ids:
+            return f"Warning: No models parsed from {provider} at {models_url}."
+        # Save into cache and persist
+        self._all_models_cache[provider] = {
+            'fetched_at': int(time.time()),
+            'source': models_url,
+            'models': model_ids,
+        }
+        self._save_all_models(self._all_models_cache)
+        return f"Updated all-models.json for provider '{provider}' with {len(model_ids)} models."
 
     def _build_system_prompt(self) -> str:
         system_prompt_content = "You are a helpful assistant."
@@ -232,8 +356,36 @@ class ChatClient:
                 lines.append(f"{prov}:")
                 for m in sorted(by_provider[prov]):
                     lines.append(f"  - {m}")
+            lines.append("\nTip: type 'all:' to see full provider catalogs (if downloaded via /updateAllModels). Use 'all:provider:model'.")
             self.console.print("[bold]Available models (by provider):[/bold]\n" + "\n".join(lines))
             return
+
+        # Handle dynamic 'all:' models (never touching models.json)
+        if model_key.lower().startswith('all:'):
+            rest = model_key[4:]
+            if ':' not in rest:
+                self.console.print("[bold yellow]Usage:[/bold yellow] /model all:<provider>:<model_id>")
+                return
+            prov, _, mid = rest.partition(':')
+            if not prov or not mid:
+                self.console.print("[bold yellow]Usage:[/bold yellow] /model all:<provider>:<model_id>")
+                return
+            catalog = self.get_all_models_for_provider(prov)
+            if mid not in catalog:
+                self.console.print(f"[bold red]Unknown model '{mid}' for provider '{prov}'.[/bold red] Use /updateAllModels {prov} first, then try again.")
+                return
+            # Create an ephemeral entry in models_config
+            virtual_key = f"all:{prov}:{mid}"
+            self.models_config[virtual_key] = {
+                "provider": prov,
+                "model_name": mid,
+                "alias": []
+            }
+            self.current_model_key = virtual_key
+            self._update_provider_and_url()
+            self.console.print(f"[bold green]Switched to provider catalog model: '{virtual_key}'[/bold green]")
+            return
+
         # Resolve by exact name or alias
         resolved = None
         if model_key in self.models_config:
@@ -257,7 +409,7 @@ class ChatClient:
         if not resolved:
             self.console.print(f"[bold red]Unknown model: '{model_key}'[/bold red]")
             # provide suggestions
-            self.console.print("[bold]Tip:[/bold] Use /model to list grouped models, or specify provider:name. Aliases are supported.")
+            self.console.print("[bold]Tip:[/bold] Use /model to list grouped models, type 'all:' to select from full provider catalogs, or specify provider:name. Aliases are supported.")
             return
         self.current_model_key = resolved
         self._update_provider_and_url()

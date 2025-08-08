@@ -16,7 +16,7 @@ class PtkCompleter(Completer):
     def __init__(self, client: "ChatClient"):
         self.client = client
         self.all_commands = [
-            "/model", "/popContext", "/toggleYesToolFlag", "/toggleThinkingDisplay", "/o", "/b", "/replace_lines", "/spawn", "/spawn_auto", "/wait", "/tree", "/attach"
+            "/model", "/popContext", "/toggleYesToolFlag", "/toggleThinkingDisplay", "/o", "/b", "/replace_lines", "/spawn", "/spawn_auto", "/wait", "/tree", "/attach", "/updateAllModels"
         ]
 
     def _get_filesystem_suggestions(self, prefix: str) -> List[str]:
@@ -37,7 +37,12 @@ class PtkCompleter(Completer):
             return []
 
     def _model_suggestions(self, prefix: str):
-        """Suggest models grouped by provider, with support for provider:name and aliases."""
+        """Suggest models grouped by provider, with support for provider:name and aliases, plus 'all:' catalogs."""
+        # 'all:' dynamic suggestions
+        if prefix.lower().startswith('all:'):
+            for s in self.client.get_all_models_suggestions(prefix):
+                yield Completion(s, start_position=-len(prefix))
+            return
         # Gather provider-prefixed names and plain display names
         display_names = list(self.client.models_config.keys()) if getattr(self.client, 'models_config', None) else []
         for name in sorted(display_names):
@@ -95,9 +100,20 @@ class PtkCompleter(Completer):
 
         elif text.startswith("/model "):
             prefix = text[len("/model "):]
-            # Provide rich suggestions: display, provider:name, aliases
+            # Provide rich suggestions: display, provider:name, aliases, and all: catalogs
             for c in self._model_suggestions(prefix):
                 yield c
+            return
+
+        elif text.startswith("/updateAllModels "):
+            # Suggest providers
+            prefix = text[len("/updateAllModels "):]
+            try:
+                for prov in sorted(self.client.get_providers()):
+                    if prov.startswith(prefix):
+                        yield Completion(prov, start_position=-len(prefix))
+            except Exception:
+                pass
             return
 
         elif text.startswith("/spawn_auto"):
@@ -291,7 +307,7 @@ class PtkCompleter(Completer):
             if suggestions:
                 return
 
-        if not text.strip().startswith(('/', '/o ', 'b ', '/model ', '/popContext ')):
+        if not text.strip().startswith(('/', '/o ', 'b ', '/model ', '/popContext ', '/updateAllModels ')):
             line = document.text_before_cursor
             m = re.search(r'(\w{3,})$', line)
             if m:
