@@ -63,7 +63,10 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str) -> str:
             return f"Error: Cannot edit system files in protected directories!"
         # Verify file exists
         if not abs_path.exists():
-            return f"Error: File not found at {abs_path}"
+            #If the file doesn't exist, touch it
+            with open(abs_path, 'w') as f:
+                f.write('')
+            #return f"Error: File not found at {abs_path}"
         
         # Read entire file content as a single string with original newlines
         with open(abs_path, 'r', newline='') as f:
@@ -214,9 +217,6 @@ def replace_lines(file_path: str, start_line: int, end_line: int | None = None, 
             where = "after" if b == start_line else ("before" if b == start_line - 1 else "end")
             return f"Success: Inserted {where} line {start_line} in {file_path}."
 
-        # Replace/Delete require file exists
-        if not abs_path.exists():
-            return f"Error: File not found at {file_path}"
         if start_line is None or start_line < 1:
             return "Error: start_line must be >= 1."
         if end_line is None:
@@ -228,12 +228,19 @@ def replace_lines(file_path: str, start_line: int, end_line: int | None = None, 
         e_idx = end_line      # slice end is exclusive
 
         if act == "replace":
+            if not abs_path.exists():
+                #touch the file
+                with open(abs_path, 'w') as f:
+                    f.write("")
             seg = build_insert_segment(new_content)
             new_lines = lines[:s_idx] + seg + lines[e_idx:]
             write(new_lines)
             count = end_line - start_line + 1
             return f"Success: Replaced {count} line(s) [{start_line}-{end_line}] in {file_path}."
         elif act == "delete":
+            # Delete require file exists
+            if not abs_path.exists():
+                return f"Error: File not found at {file_path}"
             new_lines = lines[:s_idx] + lines[e_idx:]
             write(new_lines)
             count = end_line - start_line + 1
