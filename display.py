@@ -9,9 +9,8 @@ from rich.text import Text
 
 
 class TmuxBox:
-    """Reusable tmux-like box renderer for streaming text with wrapping.
-    Avoid Rich markup parsing for streamed lines to prevent MarkupError.
-    """
+    """Tmux-like box renderer for streaming text with safe wrapping."""
+
     def __init__(self, console: Console, title: str, borders_enabled: bool, box_style, width_provider):
         self.console = console
         self.title = title
@@ -101,29 +100,46 @@ class TmuxBox:
             self.started = True
         if text:
             self._line_buf += text
+
         width = self.width_provider()
-        # Guard against transient or pathological widths (e.g., during tmux pane resizes).
-        wrap_width = None
+        # Compute a safe wrap width
+        wrap_width: Optional[int] = None
         try:
             if self.borders_enabled and isinstance(width, int) and width >= 3:
                 wrap_width = width - 2
         except Exception:
             wrap_width = None
 
+        # Safety tripwire to avoid runaway loops if we ever fail to consume the buffer
+        prev_len = None
         while True:
+            if prev_len == len(self._line_buf) and (
+                not self._line_buf or (isinstance(wrap_width, int) and wrap_width > 0 and len(self._line_buf) > wrap_width)
+            ):
+                break
+            prev_len = len(self._line_buf)
+
             if "\n" in self._line_buf:
                 line, self._line_buf = self._popline(self._line_buf)
                 self._emit_wrapped_line(line, wrap_width)
-            else:
-                if (wrap_width is not None) and len(self._line_buf) > wrap_width:
-                    segment = self._line_buf[:wrap_width + 1]
-                    cut = segment.rfind(" ", 0, wrap_width)
-                    if cut == -1:
-                        cut = wrap_width
-                    self._emit_line(self._line_buf[:cut])
-                    self._line_buf = self._line_buf[cut:]
-                    continue
-                break
+                continue
+
+            # Soft-wrap long line without newline, but only if wrap_width is a positive int
+            if isinstance(wrap_width, int) and wrap_width > 0 and len(self._line_buf) > wrap_width:
+                window = self._line_buf[:wrap_width]
+                cut = window.rfind(" ")
+                if cut <= 0:
+                    cut = wrap_width
+                if cut < 1:
+                    cut = 1  # ensure forward progress
+                self._emit_line(self._line_buf[:cut])
+                self._line_buf = self._line_buf[cut:]
+                # Optional nicety: drop a single leading space after break
+                if self._line_buf and self._line_buf[0] == " ":
+                    self._line_buf = self._line_buf[1:]
+                continue
+
+            break
 
     def close(self):
         if self.closed:
@@ -220,12 +236,9 @@ class DisplayManager:
         return out
 
     def _build_pretty_tool_call_renderables(self, name: str, args_str: str) -> List[Any]:
-        """Build a pretty, syntax-highlighted representation of a tool call's arguments.
-        Attempts to parse JSON; code-like fields are rendered with Syntax; others as text/json.
-        """
+        """Build a pretty, syntax-highlighted representation of a tool call's arguments."""
         renderables: List[Any] = []
         title = f"[bold yellow]Tool Call: {name}[/bold yellow]"
-        # Try to parse JSON
         parsed: Optional[Any] = None
         try:
             parsed = json.loads(args_str or "{}")
@@ -240,7 +253,6 @@ class DisplayManager:
                 return True
             if s.startswith("```") and s.endswith("```"):
                 return True
-            # heuristics for code-ish content
             code_tokens = [
                 "def ", "class ", "import ", "#!/", "#!/usr",
                 "$(", ";", "{", "}", " then", " fi", " do", " done",
@@ -251,27 +263,22 @@ class DisplayManager:
             tool = (name_ or "").lower()
             k = (key or "").lower()
             s = (val or "").strip()
-            # direct tool mapping
             if tool in ("bash", "sh"):
                 return "bash"
             if tool in ("python",):
                 return "python"
-            # key-based mapping
             if k in ("script", "bash", "shell", "cmd", "command"):
-                # decide between bash or python by content
                 if "def " in s or "import " in s or s.startswith("#!/usr/bin/env python"):
                     return "python"
                 return "bash"
             if k in ("py", "python_code", "code_py"):
                 return "python"
             if k in ("json", "payload", "body"):
-                # might be JSON
                 try:
                     json.loads(s)
                     return "json"
                 except Exception:
                     pass
-            # content-based hints
             try:
                 obj = json.loads(s)
                 if isinstance(obj, (dict, list)):
@@ -282,16 +289,13 @@ class DisplayManager:
                 return "xml"
             if s.startswith("{") and s.endswith("}"):
                 return "json"
-            # default
             return "bash" if any(tok in s for tok in ["#!/", "$(", ";"]) else "python" if any(tok in s for tok in ["def ", "import "]) else "text"
 
         if parsed is None or not isinstance(parsed, dict):
-            # Fallback: show raw string
             s = args_str or "{}"
             renderables.append(Panel(Text(s, no_wrap=False, overflow="fold"), title=title, border_style="yellow", box=self.client.boxStyle))
             return renderables
 
-        # Build per-field panels, code fields nicely syntax-highlighted
         sub_renders: List[Any] = []
         for k, v in parsed.items():
             if isinstance(v, str) and is_code_like(v):
@@ -299,16 +303,13 @@ class DisplayManager:
                 if lang == "text":
                     sub_renders.append(Panel(Text(v, no_wrap=False, overflow="fold"), title=f"[bold]{k}[/bold]", border_style="yellow", box=self.client.boxStyle))
                 else:
-                    # Strip code fences for better highlighting if present
                     code = v
                     if code.strip().startswith("```") and code.strip().endswith("```"):
                         inner = code.strip().strip("`")
-                        # naive fence removal: ```lang\n...```
                         parts = inner.split("\n", 1)
                         code = parts[1] if len(parts) == 2 else parts[0]
                     sub_renders.append(Panel(Syntax(code, lang, theme="monokai", line_numbers=self.client.borders_enabled, word_wrap=True), title=f"[bold]{k}[/bold]", border_style="yellow", box=self.client.boxStyle))
             else:
-                # Pretty-print non-code JSON values
                 try:
                     pretty = json.dumps(v, indent=2, ensure_ascii=False) if not isinstance(v, str) else v
                 except Exception:
@@ -323,7 +324,6 @@ class DisplayManager:
     def _render_pretty_tool_calls_only(self, tool_calls: List[Dict]):
         if not tool_calls:
             return
-        # Build pretty panels only for tool calls
         sub_panels: List[Any] = []
         for tc in tool_calls:
             func = tc.get("function", {})
@@ -354,7 +354,7 @@ class DisplayManager:
                     border_style=border_style,
                     box=self.client.boxStyle
                 ), crop=False)
-                # Pretty summaries remain
+                # Optional pretty summaries based on tool name
                 try:
                     if msg.get('name') == 'wait_agents':
                         data = json.loads(msg.get('content') or '{}')
@@ -423,10 +423,8 @@ class DisplayManager:
                 func = tc.get("function", {})
                 name, args_str = func.get("name", "..."), func.get("arguments", "")
                 if pretty_tool_calls:
-                    # Final pass: pretty print
                     renderables.extend(self._build_pretty_tool_call_renderables(name, args_str))
                 else:
-                    # Streaming/raw pass
                     script = None
                     try:
                         parsed = json.loads(args_str or '{}')
@@ -522,13 +520,9 @@ class DisplayManager:
             if buffers and buffers.get("tool_calls_buf"):
                 buf = buffers.get("tool_calls_buf")
                 list_items = []
-                # Normalize buffer entries into a list of (key_str, tc) where key_str is a stable identifier
                 if isinstance(buf, dict):
                     for i, (k, v) in enumerate(buf.items()):
-                        if k is None:
-                            key_str = (v.get("id") if isinstance(v, dict) else None) or str(i)
-                        else:
-                            key_str = str(k)
+                        key_str = (v.get("id") if isinstance(v, dict) else None) or (str(k) if k is not None else str(i))
                         list_items.append((key_str, v))
                 else:
                     for i, v in enumerate(buf):
@@ -544,16 +538,27 @@ class DisplayManager:
                     sess = self._ensure_session(sid, title)
                     if not sess.box.started and name:
                         sess.box.title = title
-                    # Prepare display version based on toggle and tool type
-                    display_args = args_str
-                    if self.unescape_tool_display:
-                        display_args = self._unescape_for_tool(name, args_str)
-                    if len(display_args) >= sess.consumed_len:
-                        sess.append_cumulative(display_args)
+
+                    # Track deltas using raw (escaped) content so length never shrinks due to unescaping.
+                    if not hasattr(sess, "_raw_consumed_len"):
+                        sess._raw_consumed_len = 0
+                    raw = args_str or ""
+                    raw_len = len(raw)
+                    if raw_len >= sess._raw_consumed_len:
+                        raw_delta = raw[sess._raw_consumed_len:]
+                        if raw_delta:
+                            display_delta = self._unescape_for_tool(name, raw_delta) if self.unescape_tool_display else raw_delta
+                            sess.append(display_delta)
+                        sess._raw_consumed_len = raw_len
                     else:
-                        sess.append(display_args)
+                        # Reset if raw shrank (e.g., tool restarted)
+                        display_full = self._unescape_for_tool(name, raw) if self.unescape_tool_display else raw
+                        sess.append(display_full)
+                        sess._raw_consumed_len = raw_len
+
                     enq_order.append(sid)
                     last_tool_sid = sid
+
             # Prefer the most recent tool pane if any updated; else rotate as before
             if last_tool_sid is not None:
                 self._activate(last_tool_sid)
@@ -583,7 +588,6 @@ class DisplayManager:
             tool_calls = final_assistant_msg.get("tool_calls") or []
             self._render_pretty_tool_calls_only(tool_calls)
         elif mode == "tmux":
-            # Close all tmux raw panes first
             if self._tmux_active_id is not None:
                 cur = self._tmux_sessions.get(self._tmux_active_id)
                 if cur:
@@ -594,7 +598,6 @@ class DisplayManager:
                     sess.close()
             self._tmux_sessions.clear()
             self._tmux_box_width = None
-            # Print only pretty-printed tool call panels, do not redraw content
             tool_calls = final_assistant_msg.get("tool_calls") or []
             self._render_pretty_tool_calls_only(tool_calls)
 
@@ -620,8 +623,7 @@ class DisplayManager:
                     args_str = func.get("arguments", "")
                     title = f"[bold yellow]Tool Call: {name}[/bold yellow]" if name else "[bold yellow]Tool Call[/bold yellow]"
                     try:
-                        import json as _json
-                        parsed = _json.loads(args_str or "{}")
+                        parsed = json.loads(args_str or "{}")
                         script = parsed.get("script", "") if isinstance(parsed, dict) else ""
                         if script and name in ["bash", "python"]:
                             lang = "bash" if name == "bash" else "python"
