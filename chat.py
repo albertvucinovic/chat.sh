@@ -142,6 +142,27 @@ def main():
     try:
         agent_dir = os.environ.get('EG_AGENT_DIR')
         init_ctx_file = os.environ.get('EG_INIT_CONTEXT_FILE')
+        # Propagate model to child via environment or parent state
+        if agent_dir:
+            try:
+                # If DEFAULT_MODEL present, use it; else attempt to copy parent's model_key
+                default_model_env = os.environ.get('DEFAULT_MODEL')
+                if not default_model_env:
+                    parent_id = os.environ.get('EG_PARENT_ID')
+                    tree_id = os.environ.get('EG_TREE_ID')
+                    if tree_id and parent_id:
+                        state_path = Path('.egg/agents') / tree_id / parent_id / 'state.json'
+                        if state_path.exists():
+                            try:
+                                with open(state_path, 'r') as f:
+                                    pst = json.load(f)
+                                mk = pst.get('model_key') if isinstance(pst, dict) else None
+                                if isinstance(mk, str) and mk:
+                                    os.environ['DEFAULT_MODEL'] = mk
+                            except Exception:
+                                pass
+            except Exception:
+                pass
         consumed_marker = os.path.join(agent_dir, '.context_consumed') if agent_dir else None
         if init_ctx_file and os.path.isfile(init_ctx_file) and (not consumed_marker or not os.path.exists(consumed_marker)):
             with open(init_ctx_file, 'r', encoding='utf-8') as f:

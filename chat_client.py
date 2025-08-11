@@ -86,8 +86,8 @@ class ChatClient:
             self.console.print("[bold red]Fatal: No models configured in models.json.[/bold red]")
             sys.exit(1)
 
-        # Determine initial model from env or config meta
-        default_model_env = os.environ.get("DEFAULT_MODEL")
+        # Determine initial model from env or config meta, with propagation support
+        desired_env = os.environ.get("EG_CHILD_MODEL") or os.environ.get("DEFAULT_MODEL")
         default_from_config = None
         try:
             meta = self.providers_config.get("_meta", {}) if isinstance(self.providers_config, dict) else {}
@@ -95,12 +95,53 @@ class ChatClient:
                 default_from_config = meta.get("default_model")
         except Exception:
             pass
-        self.current_model_key = default_model_env or default_from_config
-        if not self.current_model_key or self.current_model_key not in self.models_config:
+
+        desired = desired_env or default_from_config
+
+        def _resolve_initial(desired_key: Optional[str]) -> str:
+            if not desired_key:
+                return ""
+            dk = desired_key.strip()
+            # Support provider-wide catalog models via all:
+            if dk.lower().startswith('all:'):
+                rest = dk[4:]
+                if ':' in rest:
+                    prov, _, mid = rest.partition(':')
+                    if prov and mid:
+                        virtual_key = f"all:{prov}:{mid}"
+                        # create ephemeral models_config entry for this session
+                        self.models_config[virtual_key] = {
+                            "provider": prov,
+                            "model_name": mid,
+                            "alias": []
+                        }
+                        return virtual_key
+                return ""
+            # Exact display name
+            if dk in self.models_config:
+                return dk
+            # Alias resolution (case-insensitive)
+            lk = dk.lower()
+            for display, cfg in self.models_config.items():
+                aliases = [a.lower() for a in cfg.get("alias", [])]
+                if lk in aliases:
+                    return display
+            # provider:name form
+            if ":" in dk:
+                prov, name = dk.split(":", 1)
+                for display, cfg in self.models_config.items():
+                    if cfg.get("provider") == prov and (display == name or name.lower() in [a.lower() for a in cfg.get("alias", [])]):
+                        return display
+            return ""
+
+        resolved = _resolve_initial(desired)
+        if resolved:
+            self.current_model_key = resolved
+        else:
             # Pick the first available model as a fallback
             self.current_model_key = list(self.models_config.keys())[0]
-            if default_model_env or default_from_config:
-                self.console.print(f"[bold yellow]Warning: Initial model '{default_model_env or default_from_config}' not found. Using '{self.current_model_key}'.[/bold yellow]")
+            if desired:
+                self.console.print(f"[bold yellow]Warning: Initial model '{desired}' not found. Using '{self.current_model_key}'.[/bold yellow]")
 
         # Load all-models.json for dynamic provider-wide suggestions
         self._all_models_cache: Dict[str, Dict[str, Any]] = self._load_all_models()
