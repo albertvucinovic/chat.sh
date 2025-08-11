@@ -53,20 +53,38 @@ class TmuxBox:
             self.console.print(Text(line, no_wrap=False, overflow="fold"), markup=False)
 
     def _emit_wrapped_line(self, line: str, wrap_width: Optional[int]):
-        if wrap_width is not None:
-            start = 0
-            while start < len(line):
-                segment = line[start:start + wrap_width + 1]
-                if len(segment) <= wrap_width:
-                    self._emit_line(segment)
-                    break
-                cut = segment.rfind(" ", 0, wrap_width)
-                if cut <= 0: # If no space is found, or it's at the start, break the long word
-                    cut = wrap_width
-                self._emit_line(segment[:cut])
-                start += cut
-        else:
+        # If width is invalid or <= 0, don't wrap; just emit the whole line.
+        if not isinstance(wrap_width, int) or wrap_width < 1:
             self._emit_line(line)
+            return
+
+        start = 0
+        n = len(line)
+        while start < n:
+            remaining = n - start
+            if remaining <= wrap_width:
+                self._emit_line(line[start:])
+                break
+
+            # Consider a window of exactly wrap_width characters
+            window = line[start:start + wrap_width]
+
+            # Prefer breaking on whitespace within the window
+            cut = window.rfind(" ")
+            if cut <= 0:
+                # No whitespace (or only at position 0): hard break
+                cut = wrap_width
+
+            # Ensure forward progress even in pathological cases
+            if cut < 1:
+                cut = 1
+
+            self._emit_line(line[start:start + cut])
+            start += cut
+
+            # Optional: skip exactly one space after the break to avoid leading-space artifacts
+            if start < n and line[start] == " ":
+                start += 1
 
     @staticmethod
     def _popline(buf: str):
