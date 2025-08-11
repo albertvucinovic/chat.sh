@@ -313,7 +313,8 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
 def tool_spawn_agent(args: Dict) -> str:
     context_text = args.get('context_text', '').strip()
     label = (args.get('label') or 'child').strip() or 'child'
-    model_key = args.get('model_key') or os.environ.get('DEFAULT_MODEL') or ''
+    # Prefer explicit model key; if not provided, try parent state, then DEFAULT_MODEL env
+    model_key = args.get('model_key')
 
     tree_id = os.environ.get('EG_TREE_ID')
     if not tree_id:
@@ -330,6 +331,20 @@ def tool_spawn_agent(args: Dict) -> str:
 
     parent_id = os.environ.get('EG_AGENT_ID', 'root')
     parent_cwd = str(Path.cwd())
+
+    # If no model_key provided, attempt to read parent's state.json
+    if not model_key:
+        try:
+            parent_state = _read_json(AGENTS_BASE / tree_id / parent_id / 'state.json')
+            if isinstance(parent_state, dict):
+                pmk = parent_state.get('model_key')
+                if isinstance(pmk, str) and pmk:
+                    model_key = pmk
+        except Exception:
+            model_key = model_key
+
+    if not model_key:
+        model_key = os.environ.get('DEFAULT_MODEL') or ''
 
     base_dir = AGENTS_BASE / tree_id / parent_id / 'children'
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -760,7 +775,7 @@ def tool_list_agents(args: Dict) -> str:
 def tool_spawn_agent_auto(args: Dict) -> str:
     context_text = args.get('context_text', '').strip()
     label = (args.get('label') or 'child').strip() or 'child'
-    model_key = args.get('model_key') or os.environ.get('DEFAULT_MODEL') or ''
+    model_key = args.get('model_key')
 
     tree_id = os.environ.get('EG_TREE_ID')
     if not tree_id:
@@ -777,6 +792,20 @@ def tool_spawn_agent_auto(args: Dict) -> str:
 
     parent_id = os.environ.get('EG_AGENT_ID', 'root')
     parent_cwd = str(Path.cwd())
+
+    # If no model_key provided, attempt to read parent's state.json
+    if not model_key:
+        try:
+            parent_state = _read_json(AGENTS_BASE / tree_id / parent_id / 'state.json')
+            if isinstance(parent_state, dict):
+                pmk = parent_state.get('model_key')
+                if isinstance(pmk, str) and pmk:
+                    model_key = pmk
+        except Exception:
+            model_key = model_key
+
+    if not model_key:
+        model_key = os.environ.get('DEFAULT_MODEL') or ''
 
     base_dir = AGENTS_BASE / tree_id / parent_id / 'children'
     base_dir.mkdir(parents=True, exist_ok=True)
