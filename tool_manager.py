@@ -371,7 +371,8 @@ def tool_spawn_agent(args: Dict) -> str:
     session = _ensure_session(tree_id)
     extra_env = None
     if model_key:
-        extra_env = {"DEFAULT_MODEL": model_key}
+        # Export both EG_CHILD_MODEL (highest precedence in ChatClient) and DEFAULT_MODEL
+        extra_env = {"EG_CHILD_MODEL": model_key, "DEFAULT_MODEL": model_key}
     _launch_child(session, parent_cwd, str(child_dir), child_id, tree_id, parent_id, extra_env=extra_env)
 
     return json.dumps({
@@ -585,7 +586,7 @@ def handle_tool_call(client, call: Dict, display_call: bool = True):
         except Exception:
             # 2) Try to repair common concatenated-JSON case by inserting commas between adjacent objects
             try:
-                repaired = re.sub(r"}\s*{", "},{", args_raw.strip())
+                repaired = re.sub(r"}\s*{", ",{", args_raw.strip())
                 wrapped = f"[{repaired}]"
                 parsed = json.loads(wrapped)
                 parsed_args_list = parsed if isinstance(parsed, list) else [parsed]
@@ -663,7 +664,6 @@ def handle_tool_call(client, call: Dict, display_call: bool = True):
                 sorted_known = sorted(known_tools, key=lambda x: -len(x))
                 seq = []
                 s = fn_name
-                idx_ptr = 0
                 while s:
                     matched = False
                     for kt in sorted_known:
@@ -673,13 +673,11 @@ def handle_tool_call(client, call: Dict, display_call: bool = True):
                             matched = True
                             break
                     if not matched:
-                        # cannot tokenize further
                         break
                 if len(seq) == len(parsed_args_list):
                     names_seq = seq
         # Ensure names_seq length matches parsed args; attempt heuristics if mismatch
         if len(names_seq) != len(parsed_args_list):
-            # Heuristic: if parsed args look like spawn_agent payloads, map to spawn_agent/_auto
             try:
                 all_have_ctx = all(isinstance(a, dict) and 'context_text' in a for a in parsed_args_list)
             except Exception:
@@ -692,6 +690,18 @@ def handle_tool_call(client, call: Dict, display_call: bool = True):
 
         for i, args in enumerate(parsed_args_list):
             cur_name = names_seq[i]
+            # Inject current model if spawning and no explicit model was provided
+            if cur_name in ("spawn_agent", "spawn_agent_auto"):
+                try:
+                    if not isinstance(args, dict):
+                        args = {}
+                        parsed_args_list[i] = args
+                    if not args.get("model_key"):
+                        mk = getattr(client, "current_model_key", "") or ""
+                        if mk:
+                            args["model_key"] = mk
+                except Exception:
+                    pass
             try:
                 if cur_name == "bash":
                     out = run_bash_script(args.get("script", ""))
@@ -832,7 +842,7 @@ def tool_spawn_agent_auto(args: Dict) -> str:
     session = _ensure_session(tree_id)
     extra_env = None
     if model_key:
-        extra_env = {"DEFAULT_MODEL": model_key, "EG_YES_TOOL_FLAG": "1"}
+        extra_env = {"EG_CHILD_MODEL": model_key, "DEFAULT_MODEL": model_key, "EG_YES_TOOL_FLAG": "1"}
     else:
         extra_env = {"EG_YES_TOOL_FLAG": "1"}
     _launch_child(session, parent_cwd, str(child_dir), child_id, tree_id, parent_id, extra_env=extra_env)

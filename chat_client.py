@@ -86,7 +86,8 @@ class ChatClient:
             self.console.print("[bold red]Fatal: No models configured in models.json.[/bold red]")
             sys.exit(1)
 
-        # Determine initial model from env or config meta, with propagation support
+        # Determine initial model from env or config meta, with precedence:
+        # EG_CHILD_MODEL > DEFAULT_MODEL > models.json default > first configured
         desired_env = os.environ.get("EG_CHILD_MODEL") or os.environ.get("DEFAULT_MODEL")
         default_from_config = None
         try:
@@ -483,7 +484,9 @@ class ChatClient:
         self.current_model_key = resolved
         self._update_provider_and_url()
         self.console.print(f"[bold green]Switched to model: '{self.current_model_key}'[/bold green]")
-        # Persist new model selection so child spawns can inherit it
+        # Persist new model selection so child spawns can inherit it immediately
+        os.environ["EG_CHILD_MODEL"] = self.current_model_key
+        os.environ["DEFAULT_MODEL"] = self.current_model_key
         self._persist_model_to_state()
 
     def _sanitize_messages_for_api(self, messages: List[Dict]) -> List[Dict]:
