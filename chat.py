@@ -312,7 +312,7 @@ def main():
                 file_path = None
                 additional_text = ""
                 if rest:
-                    if rest[0] in ('"', "'"):
+                    if rest[0] in ('\"', "'"):
                         q = rest[0]
                         end = rest.find(q, 1)
                         if end != -1:
@@ -371,7 +371,8 @@ def main():
 
                 try:
                     from tool_manager import tool_spawn_agent
-                    result_json = tool_spawn_agent({"context_text": context_text, "label": label})
+                    # Propagate selected model to subagent if available
+                    result_json = tool_spawn_agent({"context_text": context_text, "label": label, "model_key": client.current_model_key})
                     console.print(Panel(Text(result_json), title="[bold green]Spawned Agent[/bold green]", border_style="green", box=client.boxStyle))
                     client.messages.append({"role": "tool", "name": "spawn_agent", "tool_call_id": f"local_{label}", "content": result_json, "local_tool": True})
                     try:
@@ -392,7 +393,7 @@ def main():
                 file_path = None
                 additional_text = ""
                 if rest:
-                    if rest[0] in ('"', "'"):
+                    if rest[0] in ('\"', "'"):
                         q = rest[0]
                         end = rest.find(q, 1)
                         if end != -1:
@@ -451,7 +452,8 @@ def main():
 
                 try:
                     from tool_manager import tool_spawn_agent_auto
-                    result_json = tool_spawn_agent_auto({"context_text": context_text, "label": label})
+                    # Propagate selected model to subagent if available
+                    result_json = tool_spawn_agent_auto({"context_text": context_text, "label": label, "model_key": client.current_model_key})
                     console.print(Panel(Text(result_json), title="[bold green]Spawned Agent (auto)[/bold green]", border_style="green", box=client.boxStyle))
                     client.messages.append({"role": "tool", "name": "spawn_agent_auto", "tool_call_id": f"local_{label}_auto", "content": result_json, "local_tool": True})
                     try:

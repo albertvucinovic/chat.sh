@@ -88,7 +88,9 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "context_text": {"type": "string"},
-                    "label": {"type": "string"}},
+                    "label": {"type": "string"},
+                    "model_key": {"type": "string"}
+                },
                 "required": ["context_text"]}}},
     {
         "type": "function",
@@ -101,7 +103,9 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "context_text": {"type": "string"},
-                    "label": {"type": "string"}},
+                    "label": {"type": "string"},
+                    "model_key": {"type": "string"}
+                },
                 "required": ["context_text"]}}},
     {
         "type": "function",
@@ -308,6 +312,7 @@ def _launch_child(session: str, parent_cwd: str, agent_dir: str, child_id: str, 
 def tool_spawn_agent(args: Dict) -> str:
     context_text = args.get('context_text', '').strip()
     label = (args.get('label') or 'child').strip() or 'child'
+    model_key = args.get('model_key') or os.environ.get('DEFAULT_MODEL') or ''
 
     tree_id = os.environ.get('EG_TREE_ID')
     if not tree_id:
@@ -335,7 +340,7 @@ def tool_spawn_agent(args: Dict) -> str:
         "agent_id": child_id,
         "parent_id": parent_id,
         "status": "active",
-        "model_key": "",
+        "model_key": model_key,
         "spawned_at": int(time.time()),
         "children": [],
         "cwd": str(parent_cwd)
@@ -348,7 +353,10 @@ def tool_spawn_agent(args: Dict) -> str:
     (child_dir / 'init_context.txt').write_text(context_text or '', encoding='utf-8')
 
     session = _ensure_session(tree_id)
-    _launch_child(session, parent_cwd, str(child_dir), child_id, tree_id, parent_id, extra_env=None)
+    extra_env = None
+    if model_key:
+        extra_env = {"DEFAULT_MODEL": model_key}
+    _launch_child(session, parent_cwd, str(child_dir), child_id, tree_id, parent_id, extra_env=extra_env)
 
     return json.dumps({
         "tree_id": tree_id,
@@ -751,6 +759,7 @@ def tool_list_agents(args: Dict) -> str:
 def tool_spawn_agent_auto(args: Dict) -> str:
     context_text = args.get('context_text', '').strip()
     label = (args.get('label') or 'child').strip() or 'child'
+    model_key = args.get('model_key') or os.environ.get('DEFAULT_MODEL') or ''
 
     tree_id = os.environ.get('EG_TREE_ID')
     if not tree_id:
@@ -778,7 +787,7 @@ def tool_spawn_agent_auto(args: Dict) -> str:
         "agent_id": child_id,
         "parent_id": parent_id,
         "status": "active",
-        "model_key": "",
+        "model_key": model_key,
         "spawned_at": int(time.time()),
         "children": [],
         "cwd": str(parent_cwd)
@@ -791,7 +800,12 @@ def tool_spawn_agent_auto(args: Dict) -> str:
     (child_dir / 'init_context.txt').write_text(context_text or '', encoding='utf-8')
 
     session = _ensure_session(tree_id)
-    _launch_child(session, parent_cwd, str(child_dir), child_id, tree_id, parent_id, extra_env={"EG_YES_TOOL_FLAG": "1"})
+    extra_env = None
+    if model_key:
+        extra_env = {"DEFAULT_MODEL": model_key, "EG_YES_TOOL_FLAG": "1"}
+    else:
+        extra_env = {"EG_YES_TOOL_FLAG": "1"}
+    _launch_child(session, parent_cwd, str(child_dir), child_id, tree_id, parent_id, extra_env=extra_env)
 
     return json.dumps({
         "tree_id": tree_id,
