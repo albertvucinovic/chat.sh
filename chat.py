@@ -402,7 +402,7 @@ def main():
                     except Exception:
                         desc = "[Local Action] Spawned child agent."
                     # Inform model without advancing turn and add durable breadcrumb
-                    client.send_context_only(desc)
+                    #client.send_context_only(desc)
                     client.messages.append({"role": "user", "content": desc})
                 except Exception as e:
                     console.print(Panel(f"Spawn failed: {e}", title="[bold red]Spawn Error[/bold red]", border_style="red", box=client.boxStyle))
@@ -483,7 +483,7 @@ def main():
                     except Exception:
                         desc = "[Local Action] Spawned child agent (auto)."
                     # Inform model without advancing turn and add durable breadcrumb
-                    client.send_context_only(desc)
+                    #client.send_context_only(desc)
                     client.messages.append({"role": "user", "content": desc})
                 except Exception as e:
                     console.print(Panel(f"Spawn failed: {e}", title="[bold red]Spawn Error[/bold red]", border_style="red", box=client.boxStyle))
@@ -514,14 +514,14 @@ def main():
                     client.messages.append({"role": "tool", "name": "wait_agents", "tool_call_id": f"local_wait", "content": result_json, "local_tool": True})
                     desc = f"[Local Action] /wait with args: {json.dumps(args_obj)}"
                     # Inform model without advancing turn and add durable breadcrumb
-                    client.send_context_only(desc)
+                    #client.send_context_only(desc)
                     client.messages.append({"role": "user", "content": desc})
                 except KeyboardInterrupt:
                     result_json = json.dumps({"interrupted": True, "message": "wait interrupted by user"}, indent=2)
                     console.print(Panel(Text(result_json), title="[bold yellow]Wait Interrupted[/bold yellow]", border_style="yellow", box=client.boxStyle))
                     client.messages.append({"role": "tool", "name": "wait_agents", "tool_call_id": f"local_wait", "content": result_json, "local_tool": True})
                     desc = "[Local Action] /wait cancelled by user"
-                    client.send_context_only(desc)
+                    #client.send_context_only(desc)
                     client.messages.append({"role": "user", "content": desc})
                 except Exception:
                     args = json.dumps(args_obj)
