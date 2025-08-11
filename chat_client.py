@@ -106,6 +106,31 @@ class ChatClient:
         self._all_models_cache: Dict[str, Dict[str, Any]] = self._load_all_models()
 
         self.switch_model(self.current_model_key, initial_setup=True)
+        # Persist the model selection for subagent propagation
+        self._persist_model_to_state()
+
+    def _persist_model_to_state(self):
+        """Persist the currently selected display model key into this agent's state.json if available."""
+        try:
+            agent_dir = os.environ.get('EG_AGENT_DIR')
+            if not agent_dir:
+                return
+            st_path = Path(agent_dir) / 'state.json'
+            state = {}
+            if st_path.exists():
+                try:
+                    with open(st_path, 'r') as f:
+                        state = json.load(f) or {}
+                except Exception:
+                    state = {}
+            state['model_key'] = self.current_model_key
+            with open(st_path, 'w') as f:
+                json.dump(state, f, indent=2)
+        except Exception as e:
+            try:
+                self.console.print(f"[yellow]Warning: could not persist model selection: {e}[/yellow]")
+            except Exception:
+                pass
 
     def _all_models_path(self) -> Path:
         return Path(__file__).resolve().parent / "all-models.json"
@@ -386,6 +411,7 @@ class ChatClient:
             self.current_model_key = virtual_key
             self._update_provider_and_url()
             self.console.print(f"[bold green]Switched to provider catalog model: '{virtual_key}'[/bold green]")
+            self._persist_model_to_state()
             return
 
         # Resolve by exact name or alias
@@ -416,6 +442,8 @@ class ChatClient:
         self.current_model_key = resolved
         self._update_provider_and_url()
         self.console.print(f"[bold green]Switched to model: '{self.current_model_key}'[/bold green]")
+        # Persist new model selection so child spawns can inherit it
+        self._persist_model_to_state()
 
     def _sanitize_messages_for_api(self, messages: List[Dict]) -> List[Dict]:
         """Prepare messages for provider: remove unsupported keys and exclude local-only tool outputs."""
