@@ -53,7 +53,7 @@ class TmuxBox:
             self.console.print(Text(line, no_wrap=False, overflow="fold"), markup=False)
 
     def _emit_wrapped_line(self, line: str, wrap_width: Optional[int]):
-        if wrap_width:
+        if wrap_width is not None:
             start = 0
             while start < len(line):
                 segment = line[start:start + wrap_width + 1]
@@ -61,7 +61,7 @@ class TmuxBox:
                     self._emit_line(segment)
                     break
                 cut = segment.rfind(" ", 0, wrap_width)
-                if cut == -1:
+                if cut <= 0: # If no space is found, or it's at the start, break the long word
                     cut = wrap_width
                 self._emit_line(segment[:cut])
                 start += cut
@@ -84,14 +84,20 @@ class TmuxBox:
         if text:
             self._line_buf += text
         width = self.width_provider()
-        wrap_width = (width - 2) if (self.borders_enabled and width) else None
+        # Guard against transient or pathological widths (e.g., during tmux pane resizes).
+        wrap_width = None
+        try:
+            if self.borders_enabled and isinstance(width, int) and width >= 3:
+                wrap_width = width - 2
+        except Exception:
+            wrap_width = None
 
         while True:
             if "\n" in self._line_buf:
                 line, self._line_buf = self._popline(self._line_buf)
                 self._emit_wrapped_line(line, wrap_width)
             else:
-                if wrap_width and len(self._line_buf) > wrap_width:
+                if (wrap_width is not None) and len(self._line_buf) > wrap_width:
                     segment = self._line_buf[:wrap_width + 1]
                     cut = segment.rfind(" ", 0, wrap_width)
                     if cut == -1:
@@ -108,7 +114,12 @@ class TmuxBox:
             line = self._line_buf
             self._line_buf = ""
             width = self.width_provider()
-            wrap_width = (width - 2) if (self.borders_enabled and width) else None
+            wrap_width = None
+            try:
+                if self.borders_enabled and isinstance(width, int) and width >= 3:
+                    wrap_width = width - 2
+            except Exception:
+                wrap_width = None
             self._emit_wrapped_line(line, wrap_width)
         if self.started:
             self._bottom()
