@@ -84,6 +84,7 @@ TOOLS = [
             "name": "spawn_agent",
             "description": """
                 Spawn a single child agent using current CWD as working dir.
+                Please do not specify model_key unless user requested.
                 Returns {tree_id,parent_id,child_id,dir,session}.""",
             "parameters": {
                 "type": "object",
@@ -99,6 +100,7 @@ TOOLS = [
             "name": "spawn_agent_auto",
             "description": """
                 Spawn a single child agent using current CWD as working dir with auto-approval for tool calls (EG_YES_TOOL_FLAG=1).
+                Please do not specify model_key unless user requested.
                 Returns {tree_id,parent_id,child_id,dir,session}.""",
             "parameters": {
                 "type": "object",
@@ -458,28 +460,6 @@ def tool_wait_agents(args: Dict) -> str:
         "results": results,
         "pending": list(pending)
     }, indent=2)
-
-
-def tool_write_result(args: Dict) -> str:
-    agent_dir = args.get('agent_dir')
-    return_value = args.get('return_value', '')
-    summary = args.get('summary', '')
-    if not agent_dir:
-        return "Error: agent_dir is required"
-    p = Path(agent_dir)
-    res = {
-        "status": "done",
-        "return_value": return_value,
-        "summary": summary,
-        "finished_at": int(time.time())
-    }
-    _write_json(p / 'result.json', res)
-    st = _read_json(p / 'state.json') or {}
-    st['status'] = 'done'
-    _write_json(p / 'state.json', st)
-    (p / 'notify').mkdir(exist_ok=True, parents=True)
-    (p / 'notify' / 'done').write_text('1')
-    return json.dumps(res, indent=2)
 
 
 def _list_all_children_dirs(tree_id: str) -> List[Tuple[str, Path]]:
