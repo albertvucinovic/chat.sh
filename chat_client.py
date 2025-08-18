@@ -524,7 +524,7 @@ class ChatClient:
             # Begin streaming via DisplayManager
             self.display_manager.begin_stream(self.current_model_key, mode=("tmux" if in_tmux else "normal"))
             try:
-                payload = {"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": True}
+                payload = {"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": True, "cache_prompt": True }
                 response = requests.post(f"{self.base_url}", headers=self.headers, json=payload, timeout=300, stream=True)
                 response.raise_for_status()
                 
