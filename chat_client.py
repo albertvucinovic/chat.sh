@@ -58,7 +58,7 @@ class ChatClient:
         self.original_system_prompt = ""
         self.aimd_content: str = ""
         # Use a minimal box when borders are disabled
-        self.boxStyle = box.MINIMAL
+        self.boxStyle = box.ROUNDED if self.borders_enabled else box.MINIMAL
         self.yesToolFlag = False
         # Enable auto tool-call approval for subagents spawned with EG_YES_TOOL_FLAG
         try:
