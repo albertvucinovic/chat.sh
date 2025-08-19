@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Tuple, Optional
 import ast
 import re
 
-from executors import run_bash_script, run_python_script, str_replace_editor, replace_lines, tool_js_console
+from executors import run_bash_script, run_python_script, str_replace_editor, replace_lines, run_javascript
 
 TOOLS = [
     {
@@ -126,7 +126,25 @@ TOOLS = [
                     "which": {"type": "array","items": {"type": "string"}},
                     "timeout_sec": {"type": "integer"},
                     "any_mode": {"type": "boolean"}},
-                "required": ["which"]}}}
+                "required": ["which"]}}},
+    {
+        "type": "function",
+        "function": {
+            "name": "javascript",
+            "description": """
+                Execute a javascript script in a browser remote debug mode.
+                Searches for tab with the url if url provided.
+            """,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "script": { "type": "string"},
+                    "url": {"type": "string"}
+                },
+                "required": ["script"]
+            }
+        }
+    }
 ]
 
 
@@ -687,6 +705,8 @@ def handle_tool_call(client, call: Dict, display_call: bool = True):
                     out = run_bash_script(args.get("script", ""))
                 elif cur_name == "python":
                     out = run_python_script(args.get("script", ""))
+                elif cur_name == "javascript":
+                    out = run_javascript(args)
                 elif cur_name == "popContext":
                     out = client.pop_context(args.get("return_value", ""))
                 elif cur_name == "str_replace_editor":

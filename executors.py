@@ -3,6 +3,7 @@ import sys
 import os
 from io import StringIO
 from pathlib import Path
+import json
 
 def run_bash_script(script: str) -> str:
     """Executes a bash script and captures its stdout and stderr."""
@@ -250,7 +251,7 @@ def replace_lines(file_path: str, start_line: int, end_line: int | None = None, 
     except Exception as e:
         return f"Error: {str(e)}"
 
-def tool_js_console(args: dict) -> str:
+def run_javascript(args: dict) -> str:
     """
     Execute a JS snippet in a Chrome/Chromium tab that is already running
     with `--remote-debugging-port=9222`.
@@ -261,7 +262,7 @@ def tool_js_console(args: dict) -> str:
     if not script:
         return "Error: No JavaScript `script` supplied to js_console."
     # -------------------------------------------------------------
-    # 1️⃣  Try Selenium first (fallback to Playwright if you prefer)                                                                                       │
+    # 1️⃣  Try Selenium first (fallback to Playwright if you prefer)
     # -------------------------------------------------------------
     try:
         # Lazy‑import so the rest of the program works even if Selenium is missing.
@@ -273,7 +274,7 @@ def tool_js_console(args: dict) -> str:
     except Exception as e:
         return f"Error: Selenium (or webdriver‑manager) not installed – {e}"
     # -------------------------------------------------------------
-    # 2️⃣  Connect to the existing Chrome instance that was started                                                                                        │
+    # 2️⃣  Connect to the existing Chrome instance that was started
     #    with `--remote-debugging-port=9222`.
     # -------------------------------------------------------------
     try:
@@ -288,7 +289,7 @@ def tool_js_console(args: dict) -> str:
         return f"Error: Could not attach to Chrome on port 9222 – {e}\n" \
                "Make sure Chrome is launched with `--remote-debugging-port=9222`."
     # -------------------------------------------------------------
-    # 3️⃣  (Optional) Pick the tab that matches `url` if provided.                                                                                         │
+    # 3️⃣  (Optional) Pick the tab that matches `url` if provided.
     # -------------------------------------------------------------
     try:
         # Selenium treats each tab as a window handle.
@@ -313,7 +314,7 @@ def tool_js_console(args: dict) -> str:
         driver.quit()
         return f"Error while selecting tab: {e}"
     # -------------------------------------------------------------
-    # 4️⃣  Execute the supplied JavaScript.                                                                                                                │
+    # 4️⃣  Execute the supplied JavaScript.
     # -------------------------------------------------------------
     try:
         # Selenium's `execute_script` automatically wraps the snippet in a function.
