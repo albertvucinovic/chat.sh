@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Tuple, Optional
 import ast
 import re
 
-from executors import run_bash_script, run_python_script, str_replace_editor, replace_lines
+from executors import run_bash_script, run_python_script, str_replace_editor, replace_lines, run_javascript
 
 TOOLS = [
     {
@@ -126,7 +126,33 @@ TOOLS = [
                     "which": {"type": "array","items": {"type": "string"}},
                     "timeout_sec": {"type": "integer"},
                     "any_mode": {"type": "boolean"}},
-                "required": ["which"]}}}
+                "required": ["which"]}}},
+    {
+        "type": "function",
+        "function": {
+            "name": "javascript",
+            "description": """
+                Execute a javascript function body in a browser remote debug mode.
+                Searches for tab with the url if url provided. If it doesn't find it, it opens a new tab with and visits the url.
+                To get the result of the script execution, you have to explicitly "return" it from javascript:
+                    function extract() {
+                      out = "something calculated here..."
+                      //...
+                      return out;
+                    }
+                    return extract();
+                This is because the tool already wraps the script in a function.
+            """,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "script": { "type": "string"},
+                    "url": {"type": "string"}
+                },
+                "required": ["script"]
+            }
+        }
+    }
 ]
 
 
@@ -687,6 +713,8 @@ def handle_tool_call(client, call: Dict, display_call: bool = True):
                     out = run_bash_script(args.get("script", ""))
                 elif cur_name == "python":
                     out = run_python_script(args.get("script", ""))
+                elif cur_name == "javascript":
+                    out = run_javascript(args)
                 elif cur_name == "popContext":
                     out = client.pop_context(args.get("return_value", ""))
                 elif cur_name == "str_replace_editor":
