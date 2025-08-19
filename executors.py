@@ -253,79 +253,97 @@ def replace_lines(file_path: str, start_line: int, end_line: int | None = None, 
 
 def run_javascript(args: dict) -> str:
     """
-    Execute a JS snippet in a Chrome/Chromium tab that is already running
+    Execute a JS snippet in a Chrome/Chromium instance that is already running
     with `--remote-debugging-port=9222`.
-    Returns a JSON‑encoded string with the result or an error message.
+    * If `url` is supplied, the function tries to locate a tab whose current URL
+      contains that string.
+    * If no such tab exists (and `url` is non‑empty), a new tab is opened and
+      navigated to the supplied URL before running the script.
+    * Returns a JSON string: {"result": <script‑return‑value>} or an error message.
     """
+    import json
     script = args.get("script", "")
     url_filter = args.get("url", "").strip()
     if not script:
-        return "Error: No JavaScript `script` supplied to js_console."
+        return json.dumps({"error": "No JavaScript `script` supplied to run_javascript."})
     # -------------------------------------------------------------
-    # 1️⃣  Try Selenium first (fallback to Playwright if you prefer)
+    # 1️⃣  Load Selenium (fallback to Playwright if you prefer)
     # -------------------------------------------------------------
     try:
-        # Lazy‑import so the rest of the program works even if Selenium is missing.
         from selenium import webdriver
         from selenium.webdriver.chrome.service import Service
         from selenium.webdriver.chrome.options import Options
-        # webdriver‑manager will download the correct driver for you.
         from webdriver_manager.chrome import ChromeDriverManager
     except Exception as e:
-        return f"Error: Selenium (or webdriver‑manager) not installed – {e}"
+        return json.dumps({"error": f"Selenium (or webdriver‑manager) not installed – {e}"})
     # -------------------------------------------------------------
-    # 2️⃣  Connect to the existing Chrome instance that was started
-    #    with `--remote-debugging-port=9222`.
+    # 2️⃣  Attach to the existing Chrome instance started with
+    #    `--remote-debugging-port=9222`
     # -------------------------------------------------------------
     try:
         chrome_options = Options()
-        # This tells Selenium to *attach* to the running Chrome instead of launching a new one.
         chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
         driver = webdriver.Chrome(
             service=Service(ChromeDriverManager().install()),
             options=chrome_options,
         )
     except Exception as e:
-        return f"Error: Could not attach to Chrome on port 9222 – {e}\n" \
-               "Make sure Chrome is launched with `--remote-debugging-port=9222`."
+        return json.dumps(
+            {
+                "error": (
+                    f"Could not attach to Chrome on port 9222 – {e}. "
+                    "Make sure Chrome is launched with `--remote-debugging-port=9222`."
+                )
+            }
+        )
     # -------------------------------------------------------------
-    # 3️⃣  (Optional) Pick the tab that matches `url` if provided.
+    # 3️⃣  Choose an existing tab that matches the URL filter, or open a new one.
     # -------------------------------------------------------------
     try:
-        # Selenium treats each tab as a window handle.
-        handles = driver.window_handles
+        original_handles = driver.window_handles
         target_handle = None
         if url_filter:
-            for h in handles:
+            # Look for a matching tab
+            for h in original_handles:
                 driver.switch_to.window(h)
                 current_url = driver.current_url or ""
-                if url_filter in current_url:
+                if url_filter == current_url:
                     target_handle = h
                     break
-        # Fallback to the first tab.
+            # If we didn't find a match, open a new tab with the desired URL
+            if not target_handle:
+                # Open a new tab and navigate to the URL in one step
+                driver.execute_script("window.open(arguments[0]);", url_filter)
+                # Selenium now has an extra window handle
+                new_handles = driver.window_handles
+                # The new handle is the one that wasn't present before
+                target_handle = next(
+                    (h for h in new_handles if h not in original_handles), None
+                )
+                if target_handle is None:
+                    # Fallback: just use the newest handle
+                    target_handle = new_handles[-1]
+        # If no URL filter or still no target, just fall back to the first tab
         if not target_handle:
-            target_handle = handles[0] if handles else None
-        if target_handle:
-            driver.switch_to.window(target_handle)
-        else:
-            return "Error: No Chrome tabs found."
+            if not original_handles:
+                return json.dumps({"error": "No Chrome tabs found."})
+            target_handle = original_handles[0]
+        driver.switch_to.window(target_handle)
     except Exception as e:
-        # Even if tab selection fails we still want to close the driver cleanly.
         driver.quit()
-        return f"Error while selecting tab: {e}"
+        return json.dumps({"error": f"While selecting/creating tab: {e}"})
     # -------------------------------------------------------------
-    # 4️⃣  Execute the supplied JavaScript.
+    # 4️⃣  Execute the supplied JavaScript and serialise the return value.
     # -------------------------------------------------------------
     try:
-        # Selenium's `execute_script` automatically wraps the snippet in a function.
-        # If the user wants a return value they must use the `return` keyword.
+        # Selenium's `execute_script` auto‑wraps the snippet in a function.
+        # Use `return` in your JS if you need a value.
         result = driver.execute_script(script)
-        # Serialise the Python result to JSON so the LLM can parse it reliably.
-        # Most browsers will return primitives, objects become dicts, arrays become lists.
         out = json.dumps({"result": result}, ensure_ascii=False, indent=2)
     except Exception as e:
-        out = f"Error during script execution: {e}"
+        out = json.dumps({"error": f"Error during script execution: {e}"})
     finally:
-        # We *do not* quit the driver here – it only detaches, so no Chrome window is closed.
+        # Detach from Chrome – do NOT close the browser window.
         driver.quit()
     return out
+

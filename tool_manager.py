@@ -133,7 +133,15 @@ TOOLS = [
             "name": "javascript",
             "description": """
                 Execute a javascript script in a browser remote debug mode.
-                Searches for tab with the url if url provided.
+                Searches for tab with the url if url provided. If it doesn't find it, it opens a new tab with and visits the url.
+                To get the result of the script execution, you have to explicitly "return" it from javascript:
+                    function extract() {
+                      out = "something calculated here..."
+                      //...
+                      return out;
+                    }
+                    return extract();
+                This is because the tool already wraps the script in a function.
             """,
             "parameters": {
                 "type": "object",
