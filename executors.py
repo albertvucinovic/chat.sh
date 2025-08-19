@@ -256,14 +256,19 @@ def run_javascript(args: dict) -> str:
     Execute a JS snippet in a Chrome/Chromium instance that is already running
     with `--remote-debugging-port=9222`.
     * If `url` is supplied, the function tries to locate a tab whose current URL
-      contains that string.
+      exactly matches that string (including scheme, host, path and query).
+      You can also request “query‑parameter exact” matching by setting
+      `url_match_mode` to "exact_query".
     * If no such tab exists (and `url` is non‑empty), a new tab is opened and
       navigated to the supplied URL before running the script.
     * Returns a JSON string: {"result": <script‑return‑value>} or an error message.
     """
     import json
+    from urllib.parse import urlparse, parse_qsl
     script = args.get("script", "")
     url_filter = args.get("url", "").strip()
+    # Optional mode: "exact" (default) or "exact"
+    url_match_mode = args.get("url_match_mode", "exact_query")  # new optional key
     if not script:
         return json.dumps({"error": "No JavaScript `script` supplied to run_javascript."})
     # -------------------------------------------------------------
@@ -302,19 +307,50 @@ def run_javascript(args: dict) -> str:
     try:
         original_handles = driver.window_handles
         target_handle = None
+        print(f"url_filter: {url_filter}")
         if url_filter:
-            # Look for a matching tab
+            print("312")
+            # Parse the filter once – helps with exact or query‑exact matches.
+            filter_parsed = urlparse(url_filter)
             for h in original_handles:
+                print(f"handle: {h}")
                 driver.switch_to.window(h)
                 current_url = driver.current_url or ""
-                if url_filter == current_url:
-                    target_handle = h
-                    break
+                print(f"current_url: {current_url}")
+                # --- BEGIN FIXED SECTION -----------------------------------
+                # 1️⃣ Exact full‑URL match:                                                                                                                │
+                if url_match_mode == "exact":
+                    if current_url == url_filter:
+                        target_handle = h
+                        print("EXACT MATHCHED")
+                        break
+                # 2️⃣ Exact query‑parameter match (ignores ordering of params):                                                                            │
+                elif url_match_mode == "exact_query":
+                    print("In exact_query part")
+                    cand_parsed = urlparse(current_url)
+                    # First compare scheme, netloc and path – they must be identical.
+                    if (
+                        filter_parsed.scheme == cand_parsed.scheme
+                        and filter_parsed.netloc == cand_parsed.netloc
+                        and filter_parsed.path == cand_parsed.path
+                    ):
+                        # Convert query strings to dict‑like objects (multidict safe)
+                        # if filter_qs is subset of cand_qs, it's ok
+                        filter_qs = dict(parse_qsl(filter_parsed.query, keep_blank_values=True))
+                        cand_qs   = dict(parse_qsl(cand_parsed.query, keep_blank_values=True))
+                        cand_qs = dict((k, cand_qs[k]) for k in filter_qs)
+                        if filter_qs == cand_qs:
+                            target_handle = h
+                            print("EXACT_QUERY MATCHED")
+                            break
+                # ---------------------------------------------------------
             # If we didn't find a match, open a new tab with the desired URL
             if not target_handle:
-                # Open a new tab and navigate to the URL in one step
-                driver.execute_script("window.open(arguments[0]);", url_filter)
-                # Selenium now has an extra window handle
+                print("handle not found")
+                #driver = webdriver.Chrome(
+                #    service = Service(ChromeDriverManager().install()),
+                #    options = chrome_options)
+                driver.get(url_filter)
                 new_handles = driver.window_handles
                 # The new handle is the one that wasn't present before
                 target_handle = next(
@@ -323,7 +359,7 @@ def run_javascript(args: dict) -> str:
                 if target_handle is None:
                     # Fallback: just use the newest handle
                     target_handle = new_handles[-1]
-        # If no URL filter or still no target, just fall back to the first tab
+        # If no URL filter or still no target, fall back to the first tab
         if not target_handle:
             if not original_handles:
                 return json.dumps({"error": "No Chrome tabs found."})
@@ -346,4 +382,3 @@ def run_javascript(args: dict) -> str:
         # Detach from Chrome – do NOT close the browser window.
         driver.quit()
     return out
-

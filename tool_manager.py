@@ -132,7 +132,7 @@ TOOLS = [
         "function": {
             "name": "javascript",
             "description": """
-                Execute a javascript script in a browser remote debug mode.
+                Execute a javascript function body in a browser remote debug mode.
                 Searches for tab with the url if url provided. If it doesn't find it, it opens a new tab with and visits the url.
                 To get the result of the script execution, you have to explicitly "return" it from javascript:
                     function extract() {
