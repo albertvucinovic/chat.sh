@@ -142,6 +142,9 @@ TOOLS = [
                     }
                     return extract();
                 This is because the tool already wraps the script in a function.
+                ANTIPATTERN:
+                  (()=>{...;return something;})();
+                  Returns nothing, because "return" has to be called on top level of "script" code.
             """,
             "parameters": {
                 "type": "object",
