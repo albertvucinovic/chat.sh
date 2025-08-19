@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Tuple, Optional
 import ast
 import re
 
-from executors import run_bash_script, run_python_script, str_replace_editor, replace_lines
+from executors import run_bash_script, run_python_script, str_replace_editor, replace_lines, tool_js_console
 
 TOOLS = [
     {

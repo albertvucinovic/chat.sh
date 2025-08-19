@@ -67,14 +67,14 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str) -> str:
             with open(abs_path, 'w') as f:
                 f.write('')
             #return f"Error: File not found at {abs_path}"
-        
+
         # Read entire file content as a single string with original newlines
         with open(abs_path, 'r', newline='') as f:
             content = f.read()
-        
+
         # Track replacements
         replacements = []
-        
+
         # Full file replacement - search entire content
         if old_str == "":
             new_content = new_str + content
@@ -93,13 +93,13 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str) -> str:
             # Find longest substring starting with old_str
             longest_match = ""
             start_index = 0
-            
+
             while start_index < len(content):
                 # Find next occurrence of old_str's first character
                 start_index = content.find(old_str[0], start_index)
                 if start_index == -1:
                     break
-                
+
                 # Check how many consecutive characters match
                 match_length = 0
                 for i in range(len(old_str)):
@@ -108,14 +108,14 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str) -> str:
                     if content[start_index + i] != old_str[i]:
                         break
                     match_length += 1
-                
+
                 # Update longest match found
                 if match_length > len(longest_match):
                     longest_match = content[start_index:start_index + match_length]
-                
+
                 # Move to next position
                 start_index += 1
-                
+
             # Prepare error message with longest match
             if longest_match:
                 # Find context around the longest match
@@ -123,7 +123,7 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str) -> str:
                 context_start = max(0, match_index - 20)
                 context_end = min(len(content), match_index + len(longest_match) + 20)
                 context = content[context_start:context_end]
-                
+
                 return (
                     f"String not found in file. Found longest match starting with old string: {len(longest_match)} characters.\n"
                     f"Longest match: {repr(longest_match)}\n"
@@ -131,15 +131,15 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str) -> str:
                 )
             else:
                 return (
-                    f"String not found in file. Old string length: {len(old_str)}, " 
+                    f"String not found in file. Old string length: {len(old_str)}, "
                     f"File length: {len(content)}, First 100 chars of old string: {repr(old_str[:100])}, "
                     f"First 200 chars of file: {repr(content[:200])}"
                 )
-        
+
         # Write changes
         with open(abs_path, 'w', newline='') as f:
             f.write(new_content)
-        
+
         return f"Success! Replaced in {', '.join(replacements)}"
     except Exception as e:
         return f"Error: {str(e)}"
@@ -158,7 +158,7 @@ def replace_lines(file_path: str, start_line: int, end_line: int | None = None, 
 
     Notes:
     - File must exist for replace/delete. For insert, missing file is allowed only if inserting at beginning (before line 1).
-    - new_content is split by lines; each inserted line is written with a trailing 
+    - new_content is split by lines; each inserted line is written with a trailing
 .
     - Returns a short success message describing the change, or an error.
     """
@@ -249,3 +249,82 @@ def replace_lines(file_path: str, start_line: int, end_line: int | None = None, 
             return "Error: Unknown action."
     except Exception as e:
         return f"Error: {str(e)}"
+
+def tool_js_console(args: dict) -> str:
+    """
+    Execute a JS snippet in a Chrome/Chromium tab that is already running
+    with `--remote-debugging-port=9222`.
+    Returns a JSON‑encoded string with the result or an error message.
+    """
+    script = args.get("script", "")
+    url_filter = args.get("url", "").strip()
+    if not script:
+        return "Error: No JavaScript `script` supplied to js_console."
+    # -------------------------------------------------------------
+    # 1️⃣  Try Selenium first (fallback to Playwright if you prefer)                                                                                       │
+    # -------------------------------------------------------------
+    try:
+        # Lazy‑import so the rest of the program works even if Selenium is missing.
+        from selenium import webdriver
+        from selenium.webdriver.chrome.service import Service
+        from selenium.webdriver.chrome.options import Options
+        # webdriver‑manager will download the correct driver for you.
+        from webdriver_manager.chrome import ChromeDriverManager
+    except Exception as e:
+        return f"Error: Selenium (or webdriver‑manager) not installed – {e}"
+    # -------------------------------------------------------------
+    # 2️⃣  Connect to the existing Chrome instance that was started                                                                                        │
+    #    with `--remote-debugging-port=9222`.
+    # -------------------------------------------------------------
+    try:
+        chrome_options = Options()
+        # This tells Selenium to *attach* to the running Chrome instead of launching a new one.
+        chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+        driver = webdriver.Chrome(
+            service=Service(ChromeDriverManager().install()),
+            options=chrome_options,
+        )
+    except Exception as e:
+        return f"Error: Could not attach to Chrome on port 9222 – {e}\n" \
+               "Make sure Chrome is launched with `--remote-debugging-port=9222`."
+    # -------------------------------------------------------------
+    # 3️⃣  (Optional) Pick the tab that matches `url` if provided.                                                                                         │
+    # -------------------------------------------------------------
+    try:
+        # Selenium treats each tab as a window handle.
+        handles = driver.window_handles
+        target_handle = None
+        if url_filter:
+            for h in handles:
+                driver.switch_to.window(h)
+                current_url = driver.current_url or ""
+                if url_filter in current_url:
+                    target_handle = h
+                    break
+        # Fallback to the first tab.
+        if not target_handle:
+            target_handle = handles[0] if handles else None
+        if target_handle:
+            driver.switch_to.window(target_handle)
+        else:
+            return "Error: No Chrome tabs found."
+    except Exception as e:
+        # Even if tab selection fails we still want to close the driver cleanly.
+        driver.quit()
+        return f"Error while selecting tab: {e}"
+    # -------------------------------------------------------------
+    # 4️⃣  Execute the supplied JavaScript.                                                                                                                │
+    # -------------------------------------------------------------
+    try:
+        # Selenium's `execute_script` automatically wraps the snippet in a function.
+        # If the user wants a return value they must use the `return` keyword.
+        result = driver.execute_script(script)
+        # Serialise the Python result to JSON so the LLM can parse it reliably.
+        # Most browsers will return primitives, objects become dicts, arrays become lists.
+        out = json.dumps({"result": result}, ensure_ascii=False, indent=2)
+    except Exception as e:
+        out = f"Error during script execution: {e}"
+    finally:
+        # We *do not* quit the driver here – it only detaches, so no Chrome window is closed.
+        driver.quit()
+    return out
