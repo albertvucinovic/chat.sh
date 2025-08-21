@@ -465,11 +465,12 @@ class DisplayManager:
         # If we found markdown indicators, it's likely markdown
         # Also consider content with multiple lines more likely to be markdown
         line_count = len(content.split('\n'))
-        if line_count >= 2 and markdown_count >= 1:
+        if line_count >= 2 and markdown_count > 2:
             return True
+
+
+        return False
             
-        # Be more lenient with common single-line Markdown patterns
-        return markdown_count >= 1
 
     def _create_assistant_panel(self, msg: Dict, live_model_name: Optional[str] = None, pretty_tool_calls: bool = False) -> Panel:
         content = msg.get("content", "")

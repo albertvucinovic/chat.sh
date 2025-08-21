@@ -221,7 +221,7 @@ def main():
                     # Check if output is long (more than 800 lines)
                     line_count = len(output_clean.split('\n'))
                     is_long_output = line_count > 800
-                    user_wants_full_output = False
+                    user_wants_full_output = True
                     
                     # Ask user for confirmation if output is long
                     if is_long_output:
