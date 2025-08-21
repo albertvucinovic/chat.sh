@@ -237,6 +237,18 @@ class DisplayManager:
             out = out.replace('\\"', '"').replace("\\'", "'")
         return out
 
+    def _build_pretty_markdown_renderables(self, content: str) -> List[Any]:
+        """Build a pretty, syntax-highlighted representation of Markdown content."""
+        renderables: List[Any] = []
+        
+        if not content or not isinstance(content, str):
+            return renderables
+        
+        # Use Rich's Markdown renderer for the content
+        renderables.append(Markdown(content))
+        
+        return renderables
+
     def _build_pretty_tool_call_renderables(self, name: str, args_str: str) -> List[Any]:
         """Build a pretty, syntax-highlighted representation of a tool call's arguments."""
         renderables: List[Any] = []
@@ -431,6 +443,14 @@ class DisplayManager:
             '`',  # Inline code
             '[',  # Links start
             '](',  # Links middle
+            # Common LLM Markdown patterns
+            '```python',
+            '```bash',
+            '```javascript',
+            '```json',
+            '```html',
+            '```css',
+            '```sql',
         ]
         
         # Count how many markdown indicators we find
@@ -444,11 +464,12 @@ class DisplayManager:
         
         # If we found markdown indicators, it's likely markdown
         # Also consider content with multiple lines more likely to be markdown
-        line_count = len(content.split('\\n'))
+        line_count = len(content.split('\n'))
         if line_count >= 2 and markdown_count >= 1:
             return True
             
-        return markdown_count >= 2
+        # Be more lenient with common single-line Markdown patterns
+        return markdown_count >= 1
 
     def _create_assistant_panel(self, msg: Dict, live_model_name: Optional[str] = None, pretty_tool_calls: bool = False) -> Panel:
         content = msg.get("content", "")
@@ -631,6 +652,17 @@ class DisplayManager:
             # Print only pretty-printed tool call panels, do not redraw content
             tool_calls = final_assistant_msg.get("tool_calls") or []
             self._render_pretty_tool_calls_only(tool_calls)
+            
+            # Re-render the final content with Markdown formatting if detected
+            content = final_assistant_msg.get("content", "")
+            if content and self._is_markdown_content(content):
+                self.console.print("\n")
+                self.console.print(Panel(
+                    Group(*self._build_pretty_markdown_renderables(content)),
+                    title="[bold cyan]Assistant (Markdown)[/bold cyan]",
+                    border_style=self.get_border_style("cyan"),
+                    box=self.client.boxStyle
+                ))
         elif mode == "tmux":
             if self._tmux_active_id is not None:
                 cur = self._tmux_sessions.get(self._tmux_active_id)
@@ -644,6 +676,17 @@ class DisplayManager:
             self._tmux_box_width = None
             tool_calls = final_assistant_msg.get("tool_calls") or []
             self._render_pretty_tool_calls_only(tool_calls)
+            
+            # Re-render the final content with Markdown formatting if detected
+            content = final_assistant_msg.get("content", "")
+            if content and self._is_markdown_content(content):
+                self.console.print("\n")
+                self.console.print(Panel(
+                    Group(*self._build_pretty_markdown_renderables(content)),
+                    title="[bold cyan]Assistant (Markdown)[/bold cyan]",
+                    border_style=self.get_border_style("cyan"),
+                    box=self.client.boxStyle
+                ))
 
     def create_live_display(self, reasoning: Optional[str], assistant_msg: Dict) -> Group:
         renderables = []
@@ -659,8 +702,11 @@ class DisplayManager:
         if content or tool_calls:
             sub_renders = []
             if content:
-                # For live display, use text to avoid markdown parsing during streaming
-                sub_renders.append(Text(content, justify="left", no_wrap=False, overflow="fold"))
+                # Use Markdown rendering if content appears to be markdown
+                if self._is_markdown_content(content):
+                    sub_renders.append(Markdown(content))
+                else:
+                    sub_renders.append(Text(content, justify="left", no_wrap=False, overflow="fold"))
             if tool_calls:
                 for tc in tool_calls:
                     func = tc.get("function", {})
