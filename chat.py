@@ -244,12 +244,33 @@ def main():
                         preview = output_clean[:MAX_PREVIEW] + "\n... [truncated]"
 
                     header = f"Local Command Output"
+                    
+                    # Extract just the content part for markdown detection (after --- STDOUT ---)
+                    content_for_markdown = output_clean
+                    lines = output_clean.split('\n')
+                    for i, line in enumerate(lines):
+                        if line.startswith('--- STDOUT ---'):
+                            if i + 1 < len(lines):
+                                content_for_markdown = '\n'.join(lines[i+1:])
+                            break
+                    
                     if client.borders_enabled:
-                        output_renderable = Text(output_clean if saved_path is None else output_clean[:MAX_PREVIEW] + "\n... [truncated in display]")
-                        console.print(Panel(output_renderable, title="[bold green]Local Command Output[/bold green]", border_style="green", box=client.boxStyle))
+                        # Use Markdown rendering if content appears to be markdown
+                        if client.display_manager._is_markdown_content(content_for_markdown):
+                            from rich.markdown import Markdown
+                            output_renderable = Markdown(content_for_markdown if saved_path is None else content_for_markdown[:MAX_PREVIEW] + "\n... [truncated in display]")
+                            console.print(Panel(output_renderable, title="[bold green]Local Command Output (Markdown)[/bold green]", border_style="green", box=client.boxStyle))
+                        else:
+                            output_renderable = Text(output_clean if saved_path is None else output_clean[:MAX_PREVIEW] + "\n... [truncated in display]")
+                            console.print(Panel(output_renderable, title="[bold green]Local Command Output[/bold green]", border_style="green", box=client.boxStyle))
                     else:
                         console.print(f"--- {header} ---")
-                        console.print(Text(output_clean if saved_path is None else preview))
+                        # Use Markdown rendering if content appears to be markdown
+                        if client.display_manager._is_markdown_content(content_for_markdown):
+                            from rich.markdown import Markdown
+                            console.print(Markdown(content_for_markdown if saved_path is None else content_for_markdown[:MAX_PREVIEW]))
+                        else:
+                            console.print(Text(output_clean if saved_path is None else preview))
 
                     if saved_path:
                         output_section_title = f"Output too long; saved to: {saved_path}"
