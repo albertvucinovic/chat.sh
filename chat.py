@@ -7,6 +7,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
+from rich.markdown import Markdown
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -217,11 +218,31 @@ def main():
                     except Exception:
                         output_clean = output
 
+                    # Check if output is long (more than 800 lines)
+                    line_count = len(output_clean.split('\n'))
+                    is_long_output = line_count > 800
+                    user_wants_full_output = False
+                    
+                    # Ask user for confirmation if output is long
+                    if is_long_output:
+                        console.print(f"[yellow]Warning: Output is {line_count} lines long (over 800 lines).[/yellow]")
+                        while True:
+                            response = input("Include full output in context? [y/n] ").strip().lower()
+                            if response in ('y', 'n'):
+                                break
+                            console.print("Invalid input. Please enter y or n")
+                        
+                        user_wants_full_output = (response == 'y')
+
                     # Limit payload size to keep provider happy
                     MAX_PREVIEW = 15000  # characters
                     preview = output_clean
                     saved_path = None
-                    if len(output_clean) > MAX_PREVIEW:
+                    
+                    if user_wants_full_output:
+                        # User wants full output, don't truncate
+                        preview = output_clean
+                    elif len(output_clean) > MAX_PREVIEW:
                         # Save full output to an artifact file
                         artifacts_dir = Path.cwd() / ".egg" / "artifacts"
                         artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -242,6 +263,11 @@ def main():
                             except Exception:
                                 saved_path = None
                         preview = output_clean[:MAX_PREVIEW] + "\n... [truncated]"
+                    elif is_long_output:
+                        # User doesn't want long output, truncate to 100 lines
+                        lines = output_clean.split('\n')
+                        preview = '\n'.join(lines[:100]) + f"\n... [truncated, {line_count - 100} more lines]"
+                        saved_path = None
 
                     header = f"Local Command Output"
                     
@@ -255,19 +281,22 @@ def main():
                             break
                     
                     if client.borders_enabled:
-                        # Use Markdown rendering if content appears to be markdown
+                        # First render raw output in panel
+                        output_renderable = Text(output_clean if saved_path is None else output_clean[:MAX_PREVIEW] + "\n... [truncated in display]")
+                        console.print(Panel(output_renderable, title="[bold green]Local Command Output (Raw)[/bold green]", border_style="green", box=client.boxStyle))
+                        
+                        # Then render as markdown if it appears to be markdown
                         if client.display_manager._is_markdown_content(content_for_markdown):
-                            from rich.markdown import Markdown
-                            output_renderable = Markdown(content_for_markdown if saved_path is None else content_for_markdown[:MAX_PREVIEW] + "\n... [truncated in display]")
-                            console.print(Panel(output_renderable, title="[bold green]Local Command Output (Markdown)[/bold green]", border_style="green", box=client.boxStyle))
-                        else:
-                            output_renderable = Text(output_clean if saved_path is None else output_clean[:MAX_PREVIEW] + "\n... [truncated in display]")
-                            console.print(Panel(output_renderable, title="[bold green]Local Command Output[/bold green]", border_style="green", box=client.boxStyle))
+                            markdown_renderable = Markdown(content_for_markdown if saved_path is None else content_for_markdown[:MAX_PREVIEW] + "\n... [truncated in display]")
+                            console.print(Panel(markdown_renderable, title="[bold green]Local Command Output (Markdown)[/bold green]", border_style="green", box=client.boxStyle))
                     else:
+                        # First render raw output
                         console.print(f"--- {header} ---")
-                        # Use Markdown rendering if content appears to be markdown
+                        console.print(Text(output_clean if saved_path is None else preview))
+                        
+                        # Then render as markdown if it appears to be markdown
                         if client.display_manager._is_markdown_content(content_for_markdown):
-                            from rich.markdown import Markdown
+                            console.print("\n[cyan]Markdown Rendering:[/cyan]")
                             console.print(Markdown(content_for_markdown if saved_path is None else content_for_markdown[:MAX_PREVIEW]))
                         else:
                             console.print(Text(output_clean if saved_path is None else preview))
