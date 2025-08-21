@@ -283,7 +283,7 @@ def main():
                 continue
 
             elif user_input.startswith("/model"):
-                client.messages.append({"role": "user", "content": user_input})
+                # Don't add to messages that go to API, only handle locally
                 model_key = user_input[len("/model"):].strip()
                 client.switch_model(model_key)
                 continue
