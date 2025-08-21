@@ -136,6 +136,10 @@ def main():
         console.print("\n\n[bold yellow]Saving chat and exiting...[/bold yellow]")
         saved_path = client.save_chat()
         console.print(f"[green]Chat saved to:[/green] {saved_path}")
+        # Clean up environment variables to prevent affecting future sessions
+        for env_var in ['EG_CHILD_MODEL', 'DEFAULT_MODEL']:
+            if env_var in os.environ:
+                del os.environ[env_var]
         sys.exit(0)
 
     # Auto-inject initial context for child agents
