@@ -508,6 +508,30 @@ class ChatClient:
             sanitized_messages.append(sanitized_msg)
         return sanitized_messages
 
+    def _get_model_parameters(self, model_config: Dict) -> Dict:
+        """Get merged parameters from provider and model configuration.
+        
+        Model parameters override provider parameters if they conflict.
+        Returns a dictionary of parameters to include in the API request.
+        """
+        provider_name = model_config.get("provider")
+        provider_config = self.providers_config.get(provider_name) if isinstance(self.providers_config, dict) else None
+        
+        parameters = {}
+        
+        # Get provider-level parameters
+        if provider_config and isinstance(provider_config, dict):
+            provider_params = provider_config.get("parameters")
+            if isinstance(provider_params, dict):
+                parameters.update(provider_params)
+        
+        # Get model-level parameters (override provider parameters)
+        model_params = model_config.get("parameters")
+        if isinstance(model_params, dict):
+            parameters.update(model_params)
+        
+        return parameters
+
     def send_message(self, message: str):
         # Add the model key to the user message for persistent storage
         self.messages.append({"role": "user", "content": message, "model_key": self.current_model_key})
@@ -524,7 +548,12 @@ class ChatClient:
             # Begin streaming via DisplayManager
             self.display_manager.begin_stream(self.current_model_key, mode=("tmux" if in_tmux else "normal"))
             try:
-                payload = {"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": True, "cache_prompt": True }
+                # Get merged parameters from provider and model configuration
+                parameters = self._get_model_parameters(model_config)
+                
+                # Build payload with optional parameters
+                payload = {"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": True}
+                payload.update(parameters)
                 response = requests.post(f"{self.base_url}", headers=self.headers, json=payload, timeout=300, stream=True)
                 response.raise_for_status()
                 

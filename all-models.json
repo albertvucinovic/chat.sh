@@ -534,6 +534,14 @@
         "deepseek-r1-distill-llama-70b",
         "playai-tts"
       ]
+    },
+    "deepseek": {
+      "fetched_at": 1755776953,
+      "source": "https://api.deepseek.com/models",
+      "models": [
+        "deepseek-chat",
+        "deepseek-reasoner"
+      ]
     }
   }
 }
