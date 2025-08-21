@@ -1,4 +1,5 @@
 import json
+import re
 from collections import OrderedDict
 from typing import Dict, List, Optional, Any
 
@@ -6,6 +7,7 @@ from rich.console import Console, Group
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
+from rich.markdown import Markdown
 
 
 class TmuxBox:
@@ -410,6 +412,44 @@ class DisplayManager:
         except Exception as e:
             self.console.print(f"[red]Error rendering message: {e}[/red]")
 
+    def _is_markdown_content(self, content: str) -> bool:
+        """Check if content appears to be Markdown format."""
+        if not content or not isinstance(content, str):
+            return False
+        
+        # Common Markdown patterns - simpler detection
+        markdown_indicators = [
+            '# ',  # Headers
+            '## ',  # Headers
+            '### ',  # Headers
+            '**',  # Bold
+            '* ',  # List items or italic
+            '- ',  # List items
+            '+ ',  # List items
+            '> ',  # Blockquotes
+            '```',  # Code blocks
+            '`',  # Inline code
+            '[',  # Links start
+            '](',  # Links middle
+        ]
+        
+        # Count how many markdown indicators we find
+        markdown_count = 0
+        for indicator in markdown_indicators:
+            if indicator in content:
+                markdown_count += 1
+                # Give extra weight to certain patterns
+                if indicator in ['```', '# ', '## ', '### ']:
+                    markdown_count += 2
+        
+        # If we found markdown indicators, it's likely markdown
+        # Also consider content with multiple lines more likely to be markdown
+        line_count = len(content.split('\\n'))
+        if line_count >= 2 and markdown_count >= 1:
+            return True
+            
+        return markdown_count >= 2
+
     def _create_assistant_panel(self, msg: Dict, live_model_name: Optional[str] = None, pretty_tool_calls: bool = False) -> Panel:
         content = msg.get("content", "")
         tool_calls = msg.get("tool_calls", [])
@@ -417,7 +457,11 @@ class DisplayManager:
         model_name = live_model_name or msg.get("model_key", self.client.current_model_key)
         title = f"[bold cyan]Assistant ({model_name})[/bold cyan]"
         if content:
-            renderables.append(Text(content, justify="left", no_wrap=False, overflow="fold"))
+            # Use Markdown rendering if content appears to be markdown
+            if self._is_markdown_content(content):
+                renderables.append(Markdown(content))
+            else:
+                renderables.append(Text(content, justify="left", no_wrap=False, overflow="fold"))
         if tool_calls:
             for tc in tool_calls:
                 func = tc.get("function", {})
@@ -615,6 +659,7 @@ class DisplayManager:
         if content or tool_calls:
             sub_renders = []
             if content:
+                # For live display, use text to avoid markdown parsing during streaming
                 sub_renders.append(Text(content, justify="left", no_wrap=False, overflow="fold"))
             if tool_calls:
                 for tc in tool_calls:
