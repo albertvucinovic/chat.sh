@@ -382,3 +382,10 @@ def run_javascript(args: dict) -> str:
         # Detach from Chrome – do NOT close the browser window.
         driver.quit()
     return out
+
+def tool_search(args: dict) -> str:
+    query = args.get('query', '').strip()
+    from tavily import TavilyClient
+    client = TavilyClient(os.getenv('TAVILY_API_KEY'))
+    return json.dumps(client.search(query = query), indent=3)
+

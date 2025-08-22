@@ -320,6 +320,25 @@ def main():
                     console.print("[yellow]Empty bash command, skipping.[/yellow]")
                 continue
 
+            elif user_input.startswith("/search"):
+                # Handle search command locally
+                rest = user_input[len("/search"):].strip()
+                if not rest:
+                    console.print("[yellow]Usage: /search <query>[/yellow]")
+                    continue
+                
+                console.print(f"\n[cyan]Performing search({rest})...[/cyan]")
+                try:
+                    from executors import tool_search
+                    result = tool_search({"query": rest})
+                    console.print(Panel(Text(result), title="[bold green]Search Results[/bold green]", border_style="green", box=client.boxStyle))
+                    client.messages.append({"role": "tool", "name": "search", "tool_call_id": f"local_search_{int(time.time())}", "content": result, "local_tool": True})
+                    desc = f"[Local Action] Searched Tavily for: {rest}"
+                    client.messages.append({"role": "user", "content": desc})
+                except Exception as e:
+                    console.print(Panel(f"Search failed: {e}", title="[bold red]Search Error[/bold red]", border_style="red", box=client.boxStyle))
+                continue
+
             elif user_input.startswith("/updateAllModels"):
                 parts = user_input.split(maxsplit=1)
                 if len(parts) != 2 or not parts[1].strip():

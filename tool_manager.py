@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Tuple, Optional
 import ast
 import re
 
-from executors import run_bash_script, run_python_script, str_replace_editor, replace_lines, run_javascript
+from executors import run_bash_script, run_python_script, str_replace_editor, replace_lines, run_javascript, tool_search
 
 TOOLS = [
     {
@@ -110,6 +110,17 @@ TOOLS = [
                     "model_key": {"type": "string"}
                 },
                 "required": ["context_text"]}}},
+    {
+        "type": "function",
+        "function": {
+            "name": "search",
+            "description": "Perform a web search (using Tavily) and return the top 5 results with titles and direct URLs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"}
+                },
+                "required": ["query"]}}},
     {
         "type": "function",
         "function": {
@@ -737,6 +748,8 @@ def handle_tool_call(client, call: Dict, display_call: bool = True):
                     out = tool_list_agents(args)
                 elif cur_name == "spawn_agent_auto":
                     out = tool_spawn_agent_auto(args)
+                elif cur_name == "search":
+                    out = tool_search(args)
                 else:
                     out = f"Unknown tool: {cur_name}"
             except Exception as e:
@@ -779,7 +792,6 @@ def tool_list_agents(args: Dict) -> str:
             if not c.is_dir():
                 continue
             state = _read_json(c / 'state.json') or {}
-            res = _read_json(c / 'result.json')
             status = "done" if isinstance(res, dict) else state.get("status", "active")
             rv = res.get("return_value") if isinstance(res, dict) else None
             children.append({

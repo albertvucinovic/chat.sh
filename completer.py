@@ -16,7 +16,7 @@ class PtkCompleter(Completer):
     def __init__(self, client: "ChatClient"):
         self.client = client
         self.all_commands = [
-            "/model", "/popContext", "/toggleYesToolFlag", "/toggleThinkingDisplay", "/o", "/b", "/replace_lines", "/spawn", "/spawn_auto", "/wait", "/tree", "/attach", "/updateAllModels"
+            "/model", "/popContext", "/toggleYesToolFlag", "/toggleThinkingDisplay", "/o", "/b", "/replace_lines", "/spawn", "/spawn_auto", "/wait", "/tree", "/attach", "/updateAllModels", "/search"
         ]
 
     def _get_filesystem_suggestions(self, prefix: str) -> List[str]:
