@@ -190,6 +190,23 @@
           "max_tokens": 128000
         }
       }
+    },
+    "baseten": {
+      "api_base": "https://inference.baseten.co/v1/chat/completions",
+      "api_key_env": "BASETEN_API_KEY",
+      "parameters": {
+        "cache_prompt": true
+      },
+      "models": {
+        "Deepseek-V3-1": {
+          "model_name": "deepseek-ai/DeepSeek-V3.1",
+          "max_tokens": 128000
+        },
+        "Openai-120b": {
+          "model_name": "openai/gpt-oss-120b",
+          "max_tokens": 128000
+        }
+      }
     }
   },
   "default_model": "Qwen3 Coder Local"

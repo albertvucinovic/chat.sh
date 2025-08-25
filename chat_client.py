@@ -554,7 +554,8 @@ class ChatClient:
                 # Build payload with optional parameters
                 payload = {"model": api_model_name, "messages": messages_for_api, "tools": self.tools, "tool_choice": "auto", "stream": True}
                 payload.update(parameters)
-                response = requests.post(f"{self.base_url}", headers=self.headers, json=payload, timeout=300, stream=True)
+                #600 because thinking models sometimes take time to start answering //if thinking not output
+                response = requests.post(f"{self.base_url}", headers=self.headers, json=payload, timeout=600, stream=True)
                 response.raise_for_status()
                 
                 for line in response.iter_lines():
