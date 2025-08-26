@@ -11,6 +11,7 @@ from rich.markdown import Markdown
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.document import Document
 
 from chat_client import ChatClient
 from completer import PtkCompleter
@@ -85,6 +86,22 @@ def main():
 
     kb = KeyBindings()
 
+    # Simple in-session history for user prompts (PageUp/PageDown navigation)
+    input_history = []  # stores previously submitted prompts (excluding slash-commands and $/$$ runs)
+    history_pos = {"idx": None}  # mutable holder so closures can update index
+
+    def _qualifies_for_history(text: str) -> bool:
+        if not text:
+            return False
+        s = text.strip()
+        if not s:
+            return False
+        return True
+
+    def _history_set_buffer(event, new_text: str):
+        buf = event.current_buffer
+        buf.set_document(Document(new_text, cursor_position=len(new_text)), bypass_readonly=True)
+
     @kb.add("c-d")
     def _(event):
         event.app.exit(result=event.current_buffer.text)
@@ -96,6 +113,7 @@ def main():
     @kb.add("c-e")
     def _(event):
         event.current_buffer.reset()
+        history_pos["idx"] = None
 
     @kb.add('right')
     def _(event):
@@ -107,6 +125,36 @@ def main():
             suggestion = event.current_buffer.suggestion
             if suggestion:
                 event.current_buffer.insert_text(suggestion.text)
+
+    # PageUp/PageDown navigate our prompt history (like typical up/down arrows)
+    @kb.add("pageup")
+    def _(event):
+        if not input_history:
+            return
+        idx = history_pos["idx"]
+        if idx is None:
+            idx = len(input_history) - 1
+        else:
+            idx = max(0, idx - 1)
+        history_pos["idx"] = idx
+        _history_set_buffer(event, input_history[idx])
+
+    @kb.add("pagedown")
+    def _(event):
+        if not input_history:
+            return
+        idx = history_pos["idx"]
+        if idx is None:
+            # Nothing selected yet; noop
+            return
+        if idx < len(input_history) - 1:
+            idx += 1
+            history_pos["idx"] = idx
+            _history_set_buffer(event, input_history[idx])
+        else:
+            # Past newest -> empty buffer
+            history_pos["idx"] = None
+            _history_set_buffer(event, "")
 
     @kb.add("c-b")
     def _(event):
@@ -201,6 +249,15 @@ def main():
         try:
             client.in_single_turn_auto_execute_calls = False
             user_input = session.prompt().strip()
+            try:
+                if _qualifies_for_history(user_input):
+                    input_history.append(user_input)
+                    # Cap history to prevent unbounded growth
+                    if len(input_history) > 1000:
+                        input_history[:] = input_history[-1000:]
+                history_pos["idx"] = None
+            except Exception:
+                history_pos["idx"] = None
 
             if not user_input:
                 client.send_message(user_input)
