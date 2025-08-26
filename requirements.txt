@@ -1,0 +1,10 @@
+openai
+selenium
+webdriver-manager
+rich
+prompt-toolkit
+pathlib
+typing
+tavily-python
+requests
+

@@ -2,6 +2,8 @@
 
 Egg is a terminal chat app that turns your shell into a comfy control room for LLMs and sub‑agents. It streams beautifully, opens agent panes in tmux, runs local tools (bash/python/JS), and keeps a filesystem ledger of every agent and result.
 
+![Egg](egg.gif)
+
 Highlights
 - tmux first: each chat runs in its own tmux session; sub‑agents appear in a right‑hand column of panes
 - Live streaming with Markdown rendering, optional “thinking” view, and pretty tool call panels
@@ -23,7 +25,7 @@ Install
 # from repo root
 python -m venv venv
 source venv/bin/activate
-pip install rich prompt_toolkit requests tiktoken tavily selenium webdriver-manager
+pip install -r requirements.txt
 
 # Add your API keys to .env (see below)
 cp .env.example .env  # if you keep one; otherwise create .env
@@ -133,7 +135,7 @@ These are exposed as OpenAI‑function style tools to your provider. Egg can als
   • Egg attaches to an existing tab that matches the URL (exact match or exact query params), or opens a new one
 - search {query} — Tavily
 - str_replace_editor {file_path, old_str, new_str}
-- replace_lines {file_path, start_line, end_line?, new_content, action, position}
+- replace_between {file_path, start_text, end_text, new_content}
 - spawn_agent {context_text, label?, model_key?}
 - spawn_agent_auto {context_text, label?, model_key?}
 - wait_agents {which: [...], timeout_sec?, any_mode?}
