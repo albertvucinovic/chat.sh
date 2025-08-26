@@ -67,7 +67,9 @@ TOOLS = [
                     replace: inclusive [start..end].
                     insert: before|after
                     start (use start=1,before for beginning; start=N+1,after for append).
-                    delete: inclusive [start..end]. new_content lines get trailing newlines.""",
+                    delete: inclusive [start..end]. new_content lines get trailing newlines.
+                You should double check the exact line numbers before using this tool.
+            """,
             "parameters": {
                 "type": "object",
                 "properties": {
