@@ -118,6 +118,8 @@ def main():
         Panel(
             "Chat started. [bold]Tab[/bold] to autocomplete, [bold]Right Arrow[/bold] to accept.\n"
             "[bold]Ctrl+D[/bold] to submit. [bold]Ctrl+B[/bold] for borders. [bold]Ctrl+E[/bold] to clear. [bold]Ctrl+C[/bold] to exit.\n"
+            "[bold]$ <command>[/bold] - Run bash command and add output to context.\n"
+            "[bold]$$ <command>[/bold] - Run bash command but don't add output to context.\n"
             "[bold]/popContext <return_value>[/bold] - Pop context from stack and return to previous. For subagents: finalize and return result to parent.\n"
             "[bold]/spawn <file.md?> <text>[/bold] - Spawn child with the given context.\n"
             "[bold]/spawn_auto <file.md?> <text>[/bold] - Spawn child with auto tool-approval.\n"
@@ -204,10 +206,11 @@ def main():
                 client.send_message(user_input)
                 continue
 
-            elif user_input.startswith("b "):
+            elif user_input.startswith("$ ") or user_input.startswith("$$ "):
                 # Run locally and append the output as a user message, but DO NOT contact the API yet
                 console.print("\n[cyan]Executing local command...[/cyan]")
-                script_to_run = user_input[2:].strip()
+                add_to_context = user_input.startswith("$ ")
+                script_to_run = user_input[2:].strip() if add_to_context else user_input[3:].strip()
                 if script_to_run:
                     output = run_bash_script(script_to_run)
                     # Sanitize output: strip ANSI escapes and control chars (keep \n, \t, \r)
@@ -314,8 +317,9 @@ def main():
                         f"```text\n{preview}\n```"
                     )
 
-                    # Append to transcript only; keep user's turn (no API call here)
-                    client.messages.append({"role": "user", "content": context_message})
+                    # Append to transcript only if using $ command (not $$); keep user's turn (no API call here)
+                    if add_to_context:
+                        client.messages.append({"role": "user", "content": context_message})
                 else:
                     console.print("[yellow]Empty bash command, skipping.[/yellow]")
                 continue
