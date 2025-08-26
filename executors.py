@@ -64,10 +64,9 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str) -> str:
             return f"Error: Cannot edit system files in protected directories!"
         # Verify file exists
         if not abs_path.exists():
-            #If the file doesn't exist, touch it
+            # If the file doesn't exist, touch it
             with open(abs_path, 'w') as f:
                 f.write('')
-            #return f"Error: File not found at {abs_path}"
 
         # Read entire file content as a single string with original newlines
         with open(abs_path, 'r', newline='') as f:
@@ -86,8 +85,9 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str) -> str:
             start = 0
             while start < len(new_content):
                 pos = new_content.find(new_str, start)
-                if pos == -1: break
-                count  = 1
+                if pos == -1:
+                    break
+                count = 1
                 start = pos + len(new_str)
             replacements.append(f"{count} location(s)")
         else:
@@ -145,109 +145,61 @@ def str_replace_editor(file_path: str, old_str: str, new_str: str) -> str:
     except Exception as e:
         return f"Error: {str(e)}"
 
-def replace_lines(file_path: str, start_line: int, end_line: int | None = None, new_content: str = "",
-                   action: str = "replace", position: str = "after") -> str:
-    """Simple, line-number based editing.
+def replace_between(file_path: str, start_text: str, end_text: str, new_text: str) -> str:
+    """Replace the first block between exact start_text and the first subsequent exact end_text.
 
-    Semantics (1-based lines):
-    - action="replace": replace inclusive lines [start_line..end_line]. If end_line is None, replace only start_line.
-    - action="insert": insert new_content relative to start_line using position ("before"|"after").
-        • Insert at beginning: start_line=1 with position="before" (works for missing files — file will be created).
-        • Append at end: start_line=N with position="after" (also accepts start_line==N+1).
-        • end_line is ignored for insert.
-    - action="delete": delete inclusive [start_line..end_line]. If end_line is None, delete only start_line.
+    Rules and behavior:
+    - Matches are exact (no regex), across the entire file content including newlines.
+    - Replaces the region INCLUDING the boundaries (start_text and end_text) with new_text.
+    - Always uses the FIRST occurrence of start_text, and then the FIRST occurrence of end_text
+      that appears AFTER the end of that start_text match.
+    - Works across line boundaries (start/end markers can span multiple lines).
+    - If start_text or the subsequent end_text is not found, returns a clear error without modifying the file.
 
-    Notes:
-    - File must exist for replace/delete. For insert, missing file is allowed only if inserting at beginning (before line 1).
-    - new_content is split by lines; each inserted line is written with a trailing
-.
-    - Returns a short success message describing the change, or an error.
+    Parameters:
+    - file_path: path to the file to edit.
+    - start_text: exact starting boundary to match (string literal, not regex).
+    - end_text: exact ending boundary to match (string literal, not regex). The first one occurring after start_text is used.
+    - new_text: the replacement text that will replace the entire matched region (boundaries included).
     """
     try:
+        # Resolve and protect system paths
         abs_path = Path(file_path).resolve()
+        system_dirs = ["/etc", "/usr", "/var", "/sys", "/boot", "/dev"]
+        if any(str(abs_path).startswith(d) for d in system_dirs):
+            return "Error: Cannot edit system files in protected directories!"
 
-        act = (action or "replace").strip().lower()
-        pos = (position or "after").strip().lower()
-        if act not in ("replace", "insert", "delete"):
-            return "Error: action must be one of: replace, insert, delete."
-        if pos not in ("before", "after"):
-            return "Error: position must be 'before' or 'after'."
-
-        # Load file if present
+        # Load content (empty content if file missing, but we won't write unless we succeed)
         if abs_path.exists():
             with open(abs_path, 'r', newline='') as f:
                 content = f.read()
-            lines = content.splitlines(keepends=True)
         else:
-            lines = []
+            content = ""
 
-        N = len(lines)
+        if not start_text:
+            return "Error: start_text cannot be empty."
+        if not end_text:
+            return "Error: end_text cannot be empty."
 
-        # Helpers
-        def build_insert_segment(s: str):
-            if not s:
-                return []
-            return [line + "\n" for line in s.splitlines()]
+        start_idx = content.find(start_text)
+        if start_idx == -1:
+            return "Error: start_text not found in file. No changes made."
+        search_from = start_idx + len(start_text)
+        end_idx = content.find(end_text, search_from)
+        if end_idx == -1:
+            return "Error: end_text not found after start_text. No changes made."
 
-        def write(lines_out):
-            abs_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(abs_path, 'w', newline='') as f:
-                f.writelines(lines_out)
+        # Replace inclusive range [start_idx .. end_idx+len(end_text))
+        new_content = content[:start_idx] + new_text + content[end_idx + len(end_text):]
 
-        # Validate and execute per action
-        if act == "insert":
-            if N == 0 and start_line == 1 and pos in ("before", "after"):
-                # create new file with content
-                new_lines = build_insert_segment(new_content)
-                write(new_lines)
-                return f"Success: Inserted at beginning in {file_path}. (file created)"
-            if not abs_path.exists():
-                return f"Error: File not found at {file_path}. Insert into a missing file is only allowed at beginning (before line 1)."
-            if start_line < 1:
-                return "Error: start_line must be >= 1 for insert."
-            if start_line > N + 1:
-                return f"Error: start_line out of bounds for insert. File has {N} line(s)."
-            # Map to boundary b
-            if start_line == N + 1:
-                b = N  # append
-            else:
-                b = start_line if pos == "after" else (start_line - 1)
-            seg = build_insert_segment(new_content)
-            new_lines = lines[:b] + seg + lines[b:]
-            write(new_lines)
-            where = "after" if b == start_line else ("before" if b == start_line - 1 else "end")
-            return f"Success: Inserted {where} line {start_line} in {file_path}."
+        abs_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(abs_path, 'w', newline='') as f:
+            f.write(new_content)
 
-        if start_line is None or start_line < 1:
-            return "Error: start_line must be >= 1."
-        if end_line is None:
-            end_line = start_line
-        if end_line < start_line:
-            return "Error: end_line cannot be less than start_line."
-        # Convert to 0-based indices
-        s_idx = start_line - 1
-        e_idx = end_line      # slice end is exclusive
-
-        if act == "replace":
-            if not abs_path.exists():
-                #touch the file
-                with open(abs_path, 'w') as f:
-                    f.write("")
-            seg = build_insert_segment(new_content)
-            new_lines = lines[:s_idx] + seg + lines[e_idx:]
-            write(new_lines)
-            count = end_line - start_line + 1
-            return f"Success: Replaced {count} line(s) [{start_line}-{end_line}] in {file_path}."
-        elif act == "delete":
-            # Delete require file exists
-            if not abs_path.exists():
-                return f"Error: File not found at {file_path}"
-            new_lines = lines[:s_idx] + lines[e_idx:]
-            write(new_lines)
-            count = end_line - start_line + 1
-            return f"Success: Deleted {count} line(s) [{start_line}-{end_line}] in {file_path}."
-        else:
-            return "Error: Unknown action."
+        return (
+            f"Success: Replaced region including boundaries at offsets "
+            f"[{start_idx}..{end_idx + len(end_text)}) in {file_path}."
+        )
     except Exception as e:
         return f"Error: {str(e)}"
 
@@ -272,7 +224,7 @@ def run_javascript(args: dict) -> str:
     if not script:
         return json.dumps({"error": "No JavaScript `script` supplied to run_javascript."})
     # -------------------------------------------------------------
-    # 1️⃣  Load Selenium (fallback to Playwright if you prefer)
+    # 1)  Load Selenium (fallback to Playwright if you prefer)
     # -------------------------------------------------------------
     try:
         from selenium import webdriver
@@ -282,7 +234,7 @@ def run_javascript(args: dict) -> str:
     except Exception as e:
         return json.dumps({"error": f"Selenium (or webdriver‑manager) not installed – {e}"})
     # -------------------------------------------------------------
-    # 2️⃣  Attach to the existing Chrome instance started with
+    # 2)  Attach to the existing Chrome instance started with
     #    `--remote-debugging-port=9222`
     # -------------------------------------------------------------
     try:
@@ -302,7 +254,7 @@ def run_javascript(args: dict) -> str:
             }
         )
     # -------------------------------------------------------------
-    # 3️⃣  Choose an existing tab that matches the URL filter, or open a new one.
+    # 3)  Choose an existing tab that matches the URL filter, or open a new one.
     # -------------------------------------------------------------
     try:
         original_handles = driver.window_handles
@@ -318,13 +270,13 @@ def run_javascript(args: dict) -> str:
                 current_url = driver.current_url or ""
                 print(f"current_url: {current_url}")
                 # --- BEGIN FIXED SECTION -----------------------------------
-                # 1️⃣ Exact full‑URL match:                                                                                                                │
+                # Exact full‑URL match:
                 if url_match_mode == "exact":
                     if current_url == url_filter:
                         target_handle = h
                         print("EXACT MATHCHED")
                         break
-                # 2️⃣ Exact query‑parameter match (ignores ordering of params):                                                                            │
+                # Exact query‑parameter match (ignores ordering of params):
                 elif url_match_mode == "exact_query":
                     print("In exact_query part")
                     cand_parsed = urlparse(current_url)
@@ -337,7 +289,7 @@ def run_javascript(args: dict) -> str:
                         # Convert query strings to dict‑like objects (multidict safe)
                         # if filter_qs is subset of cand_qs, it's ok
                         filter_qs = dict(parse_qsl(filter_parsed.query, keep_blank_values=True))
-                        cand_qs   = dict(parse_qsl(cand_parsed.query, keep_blank_values=True))
+                        cand_qs = dict(parse_qsl(cand_parsed.query, keep_blank_values=True))
                         cand_qs = dict((k, cand_qs[k]) for k in filter_qs)
                         if filter_qs == cand_qs:
                             target_handle = h
@@ -347,9 +299,6 @@ def run_javascript(args: dict) -> str:
             # If we didn't find a match, open a new tab with the desired URL
             if not target_handle:
                 print("handle not found")
-                #driver = webdriver.Chrome(
-                #    service = Service(ChromeDriverManager().install()),
-                #    options = chrome_options)
                 driver.get(url_filter)
                 new_handles = driver.window_handles
                 # The new handle is the one that wasn't present before
@@ -388,7 +337,6 @@ def tool_search(args: dict) -> str:
         query = args.get('query', '').strip()
         from tavily import TavilyClient
         client = TavilyClient(os.getenv('TAVILY_API_KEY'))
-        return json.dumps(client.search(query = query), indent=3)
+        return json.dumps(client.search(query=query), indent=3)
     except Exception as e:
         return json.dumps({"error": f"Error during search call execution: {e}"})
-

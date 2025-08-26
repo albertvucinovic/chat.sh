@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Tuple, Optional
 import ast
 import re
 
-from executors import run_bash_script, run_python_script, str_replace_editor, replace_lines, run_javascript, tool_search
+from executors import run_bash_script, run_python_script, str_replace_editor, run_javascript, tool_search, replace_between
 
 TOOLS = [
     {
@@ -57,29 +57,6 @@ TOOLS = [
                     "new_str": {"type": "string"}
                 },
                 "required": ["file_path", "old_str", "new_str"]}}},
-    {
-        "type": "function",
-        "function": {
-            "name": "replace_lines",
-            "description": """
-                Simple, predictable line-number editing:
-                action=replace|insert|delete.
-                    replace: inclusive [start..end].
-                    insert: before|after
-                    start (use start=1,before for beginning; start=N+1,after for append).
-                    delete: inclusive [start..end]. new_content lines get trailing newlines.
-                You should double check the exact line numbers before using this tool.
-            """,
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_path": {"type": "string"},
-                    "start_line": {"type": "integer"},
-                    "end_line": {"type": "integer"},
-                    "new_content": {"type": "string"},
-                    "action": {"type": "string", "enum": ["replace", "insert", "delete"]},
-                    "position": {"type": "string", "enum": ["before", "after"]}},
-                "required": ["file_path", "start_line", "new_content"]}}},
     {
         "type": "function",
         "function": {
@@ -166,6 +143,23 @@ TOOLS = [
                     "url": {"type": "string"}
                 },
                 "required": ["script"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "replace_between",
+            "description": "Replace the first region between two exact string boundaries (start_text and the first subsequent end_text) with new_text. Exact literal matching only (no regex). The boundaries themselves are also replaced. Works across line breaks. Behavior: finds the FIRST occurrence of start_text; then finds the FIRST end_text that appears AFTER the end of that start_text match; replaces the entire inclusive region with new_text. If either boundary is not found, returns a clear error and makes no changes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string"},
+                    "start_text": {"type": "string"},
+                    "end_text": {"type": "string"},
+                    "new_text": {"type": "string"}
+                },
+                "required": ["file_path", "start_text", "end_text", "new_text"]
             }
         }
     }
@@ -735,8 +729,8 @@ def handle_tool_call(client, call: Dict, display_call: bool = True):
                     out = client.pop_context(args.get("return_value", ""))
                 elif cur_name == "str_replace_editor":
                     out = str_replace_editor(args.get("file_path"), args.get("old_str"), args.get("new_str"))
-                elif cur_name == "replace_lines":
-                    out = replace_lines(args.get("file_path"), args.get("start_line"), args.get("end_line"), args.get("new_content"))
+                elif cur_name == "replace_between":
+                    out = replace_between(args.get("file_path"), args.get("start_text"), args.get("end_text"), args.get("new_text"))
                 elif cur_name == "spawn_agent":
                     out = tool_spawn_agent(args)
                 elif cur_name == "wait_agents":
@@ -794,6 +788,8 @@ def tool_list_agents(args: Dict) -> str:
             if not c.is_dir():
                 continue
             state = _read_json(c / 'state.json') or {}
+            # Read result.json if present to reflect done status and return value
+            res = _read_json(c / 'result.json')
             status = "done" if isinstance(res, dict) else state.get("status", "active")
             rv = res.get("return_value") if isinstance(res, dict) else None
             children.append({
