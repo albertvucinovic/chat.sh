@@ -177,7 +177,8 @@ def main():
             "[bold]/o <tree_id>|list[/bold] - Attach to a tree's tmux session (list to show trees).\n"
             "[bold]/toggleEscape[/bold] - Toggle display of tool call arguments between escaped and unescaped.\n"
             "[bold]/exportHtml <filename.html>[/bold] - Export current chat as a visually striking HTML page.\n"
-            "[bold]/updateAllModels <provider>[/bold] - Fetch and cache the provider's full model catalog to all-models.json.",
+            "[bold]/updateAllModels <provider>[/bold] - Fetch and cache the provider's full model catalog to all-models.json.\n"
+            "[bold]/quit[/bold] - Quit the chat application.",
             title="[bold]Welcome[/bold]",
             border_style=client.get_border_style("magenta")
         )
@@ -767,6 +768,12 @@ def main():
                 script = f"'{script_path}' {tree_id} {agent_id}" if agent_id else f"'{script_path}' {tree_id}"
                 output = run_bash_script(script)
                 console.print(Panel(Text(output), title="[bold cyan]tmux attach[/bold cyan]", border_style="cyan", box=client.boxStyle))
+                continue
+
+            elif user_input.startswith("/quit"):
+                # Handle quit command locally
+                console.print("[cyan]Quitting chat...[/cyan]")
+                shutdown()
                 continue
 
             client.send_message(user_input)

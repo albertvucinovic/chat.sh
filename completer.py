@@ -16,7 +16,7 @@ class PtkCompleter(Completer):
     def __init__(self, client: "ChatClient"):
         self.client = client
         self.all_commands = [
-            "/model", "/popContext", "/toggleYesToolFlag", "/toggleThinkingDisplay", "/o", "/b", "/replace_lines", "/spawn", "/spawn_auto", "/wait", "/tree", "/attach", "/updateAllModels", "/search"
+            "/model", "/popContext", "/toggleYesToolFlag", "/toggleThinkingDisplay", "/o", "/spawn", "/spawn_auto", "/wait", "/tree", "/attach", "/updateAllModels", "/search", "/toggleEscape", "/exportHtml"
         ]
 
     def _get_filesystem_suggestions(self, prefix: str) -> List[str]:
@@ -277,6 +277,23 @@ class PtkCompleter(Completer):
             return
 
         elif text.startswith("/popContext "):
+            return
+
+        elif text.startswith("/toggleEscape"):
+            return
+
+        elif text.startswith("/exportHtml "):
+            # Provide filesystem suggestions for the HTML export filename
+            prefix = text[len("/exportHtml "):]
+            suggestions = self._get_filesystem_suggestions(prefix)
+            for s in suggestions:
+                yield Completion(s, start_position=-len(prefix))
+            return
+
+        elif text.startswith("/toggleYesToolFlag"):
+            return
+
+        elif text.startswith("/toggleThinkingDisplay"):
             return
 
         elif text.startswith("/tree use "):
