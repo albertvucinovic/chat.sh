@@ -770,6 +770,28 @@ def main():
                 console.print(Panel(Text(output), title="[bold cyan]tmux attach[/bold cyan]", border_style="cyan", box=client.boxStyle))
                 continue
 
+            elif user_input.startswith("/rename_tree"):
+                new_name = user_input[len("/rename_tree"):
+].strip()
+                if not new_name:
+                    console.print("[yellow]Usage: /rename_tree <new_name>[/yellow]")
+                    continue
+                
+                old_tree_id = os.environ.get('EG_TREE_ID')
+                if not old_tree_id:
+                    console.print("[red]Could not determine the current tree ID.[/red]")
+                    continue
+
+                # Sanitize the new name
+                sanitized_name = re.sub(r'[^a-zA-Z0-9_.-]+', '-', new_name).lower()
+                
+                try:
+                    rename_tree(old_tree_id, sanitized_name, console, manual=True)
+                    console.print(Panel(f"Tree renamed to: {sanitized_name}", title="[bold]Agent Tree[/bold]", border_style="magenta"))
+                except Exception as e:
+                    console.print(f"[red]Error renaming tree: {e}[/red]")
+                continue
+
             elif user_input.startswith("/quit"):
                 # Handle quit command locally
                 console.print("[cyan]Quitting chat...[/cyan]")
@@ -778,12 +800,52 @@ def main():
 
             client.send_message(user_input)
 
+            # After message is sent, check for short_recap and rename tree
+            if client.short_recap:
+                old_tree_id = os.environ.get('EG_TREE_ID')
+                manual_rename_marker = Path('.egg/agents') / old_tree_id / '.manual_rename'
+                if old_tree_id and not manual_rename_marker.exists():
+                    sanitized_recap = re.sub(r'[^a-zA-Z0-9_.-]+', '-', client.short_recap).lower()
+                    if old_tree_id != sanitized_recap:
+                        try:
+                            rename_tree(old_tree_id, sanitized_recap, console)
+                            console.print(Panel(f"Tree automatically renamed to: {sanitized_recap}", title="[bold]Agent Tree[/bold]", border_style="magenta"))
+                        except Exception as e:
+                            console.print(f"[red]Error auto-renaming tree: {e}[/red]")
+                client.short_recap = None # Reset recap
+
         except KeyboardInterrupt:
             console.print("[bold yellow]\nInterrupted.[/bold yellow]")
             shutdown()
         except EOFError:
             shutdown()
 
+def rename_tree(old_id: str, new_id: str, console: Console, manual: bool = False):
+    base = Path('.egg/agents')
+    old_dir = base / old_id
+    new_dir = base / new_id
+
+    if not old_dir.exists():
+        raise FileNotFoundError(f"Old tree directory not found: {old_dir}")
+    if new_dir.exists():
+        raise FileExistsError(f"New tree directory already exists: {new_dir}")
+
+    # Rename the directory
+    old_dir.rename(new_dir)
+
+    # Update the .current_tree file
+    (base / '.current_tree').write_text(new_id)
+
+    # Update the environment variable
+    os.environ['EG_TREE_ID'] = new_id
+
+    # Rename the tmux session
+    old_session_name = f"egg-tree-{old_id}"
+    new_session_name = f"egg-tree-{new_id}"
+    run_bash_script(f"tmux rename-session -t {old_session_name} {new_session_name}")
+
+    if manual:
+        (new_dir / '.manual_rename').touch()
 
 if __name__ == "__main__":
     main()
