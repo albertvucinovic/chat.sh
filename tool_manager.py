@@ -92,7 +92,7 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "search",
+            "name": "search_tavily",
             "description": "Perform a web search (using Tavily) and return the top 5 results with titles and direct URLs.",
             "parameters": {
                 "type": "object",
@@ -744,7 +744,7 @@ def handle_tool_call(client, call: Dict, display_call: bool = True):
                     out = tool_list_agents(args)
                 elif cur_name == "spawn_agent_auto":
                     out = tool_spawn_agent_auto(args)
-                elif cur_name == "search":
+                elif cur_name == "search_tavily":
                     out = tool_search(args)
                 else:
                     out = f"Unknown tool: {cur_name}"

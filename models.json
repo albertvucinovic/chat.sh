@@ -207,6 +207,16 @@
           "max_tokens": 128000
         }
       }
+    },
+    "qwencode": {
+      "api_base": "https://portal.qwen.ai/v1/chat/completions",
+      "api_key_env": "QWEN_CODE_API_KEY",
+      "models": {
+        "qwen3-coder-plus": {
+          "model_name": "qwen3-coder-plus",
+          "max_tokens": 1000000
+        }
+      }
     }
   },
   "default_model": "Qwen3 Coder Local"
