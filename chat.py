@@ -172,9 +172,6 @@ def main():
             "[bold]/spawn <file.md?> <text>[/bold] - Spawn child with the given context.\n"
             "[bold]/spawn_auto <file.md?> <text>[/bold] - Spawn child with auto tool-approval.\n"
             "[bold]/wait <child_id|space-separated list>|any|all[/bold] - Wait for specific child agents, any, or all.\n"
-            "[bold]/tree[/bold] - List children in current tree.  [bold]/attach <tree_id?> [agent_id?][/bold] - Attach tmux.\n"
-            "[bold]/tree use <tree_id>[/bold] - Switch active agent tree for this session.  [bold]/tree list[/bold] - List existing trees.\n"
-            "[bold]/o <tree_id>|list[/bold] - Attach to a tree's tmux session (list to show trees).\n"
             "[bold]/toggleEscape[/bold] - Toggle display of tool call arguments between escaped and unescaped.\n"
             "[bold]/exportHtml <filename.html>[/bold] - Export current chat as a visually striking HTML page.\n"
             "[bold]/updateAllModels <provider>[/bold] - Fetch and cache the provider's full model catalog to all-models.json.\n"
@@ -668,130 +665,6 @@ def main():
                     client.send_message(tool_call_json)
                 continue
 
-            elif user_input.startswith("/o"):
-                # Purely local; do NOT add raw command to transcript
-                parts = user_input.split()
-                base = Path('.egg/agents')
-                if len(parts) == 1 or (len(parts) == 2 and parts[1] == 'list'):
-                    trees = [d.name for d in base.iterdir() if d.is_dir() and d.name != '.current_tree'] if base.exists() else []
-                    current = os.environ.get('EG_TREE_ID', (base / '.current_tree').read_text().strip() if (base / '.current_tree').exists() else '')
-                    lines = []
-                    for t in sorted(trees):
-                        if t == current:
-                            lines.append(f"* {t} (current)")
-                        else:
-                            lines.append(f"  {t}")
-                    tree_list = "\n".join(lines) or "<no trees>"
-                    console.print(Panel(Text(tree_list), title="[bold cyan]Trees (/o list)[/bold cyan]", border_style="cyan", box=client.boxStyle))
-                    continue
-                elif len(parts) >= 2:
-                    tree_id = parts[1]
-                    script_dir = os.path.dirname(os.path.realpath(__file__))
-                    script_path = os.path.join(script_dir, 'script', 'agents', 'attach_agent.sh')
-                    script = f"'{script_path}' {tree_id}"
-                    output = run_bash_script(script)
-                    if 'no server running' in output.lower() or 'no sessions' in output.lower():
-                        console.print(Panel("Session not found. Tree reconstruction is not yet implemented in this step.", title="[bold yellow]/o attach[/bold yellow]", border_style="yellow", box=client.boxStyle))
-                    else:
-                        console.print(Panel(Text(output), title="[bold cyan]tmux attach[/bold cyan]", border_style="cyan", box=client.boxStyle))
-                    continue
-
-            elif user_input.startswith("/tree "):
-                # Purely local navigation; do NOT add raw command to transcript
-                parts = user_input.split()
-                if len(parts) >= 2 and parts[1] == 'list':
-                    base = Path('.egg/agents')
-                    trees = [d.name for d in base.iterdir() if d.is_dir() and d.name != '.current_tree'] if base.exists() else []
-                    current = os.environ.get('EG_TREE_ID', (base / '.current_tree').read_text().strip() if (base / '.current_tree').exists() else '')
-                    lines = []
-                    for t in sorted(trees):
-                        if t == current:
-                            lines.append(f"* {t} (current)")
-                        else:
-                            lines.append(f"  {t}")
-                    tree_list = "\n".join(lines) or "<no trees>"
-                    console.print(Panel(Text(tree_list), title="[bold cyan]Agent Trees[/bold cyan]", border_style="cyan", box=client.boxStyle))
-                    continue
-                if len(parts) >= 3 and parts[1] == 'use':
-                    new_id = parts[2]
-                    base = Path('.egg/agents')
-                    if not (base / new_id).exists():
-                        console.print(f"[red]Tree '{new_id}' does not exist.[/red]")
-                        continue
-                    (base / '.current_tree').write_text(new_id)
-                    os.environ['EG_TREE_ID'] = new_id
-                    console.print(Panel(f"Switched to tree: {new_id}", title="[bold]Agent Tree[/bold]", border_style="magenta", box=client.boxStyle))
-                    continue
-
-            elif user_input.startswith("/tree"):
-                # Show all children across the tree using tool
-                try:
-                    from tool_manager import tool_list_agents
-                    result_json = tool_list_agents({"tree_id": os.environ.get('EG_TREE_ID')})
-                    console.print(Panel(Text(result_json), title="[bold cyan]Agent Tree[/bold cyan]", border_style="cyan", box=client.boxStyle))
-                    try:
-                        data = json.loads(result_json)
-                        parents = data.get("parents", {})
-                        lines = []
-                        for pid, children in parents.items():
-                            lines.append(f"{pid}:")
-                            for ch in children:
-                                cid = ch.get("child_id", "")
-                                status = ch.get("status", "")
-                                rv = ch.get("return_value", "")
-                                line = f"  - {cid} [{status}]"
-                                if rv:
-                                    line += f" — {rv}"
-                                lines.append(line)
-                        pretty = "\n".join(lines) or "<no children>"
-                        console.print(Panel(Text(pretty), title="[bold cyan]Agent Tree (Pretty)[/bold cyan]", border_style=client.get_border_style("cyan"), box=client.boxStyle))
-                    except Exception:
-                        pass
-                except Exception as e:
-                    console.print(f"[red]Error listing agents: {e}[/red]")
-                continue
-
-            elif user_input.startswith("/attach"):
-                parts = user_input.split()
-                if len(parts) < 2:
-                    base = Path('.egg/agents')
-                    tree_id = os.environ.get('EG_TREE_ID') or ((base / '.current_tree').read_text().strip() if (base / '.current_tree').exists() else '')
-                    if not tree_id:
-                        console.print("[yellow]Usage: /attach <tree_id> [agent_id][/yellow]")
-                        continue
-                    agent_id = ''
-                else:
-                    tree_id = parts[1]
-                    agent_id = parts[2] if len(parts) > 2 else ''
-                script_dir = os.path.dirname(os.path.realpath(__file__))
-                script_path = os.path.join(script_dir, 'script', 'agents', 'attach_agent.sh')
-                script = f"'{script_path}' {tree_id} {agent_id}" if agent_id else f"'{script_path}' {tree_id}"
-                output = run_bash_script(script)
-                console.print(Panel(Text(output), title="[bold cyan]tmux attach[/bold cyan]", border_style="cyan", box=client.boxStyle))
-                continue
-
-            elif user_input.startswith("/rename_tree"):
-                new_name = user_input[len("/rename_tree"):
-].strip()
-                if not new_name:
-                    console.print("[yellow]Usage: /rename_tree <new_name>[/yellow]")
-                    continue
-                
-                old_tree_id = os.environ.get('EG_TREE_ID')
-                if not old_tree_id:
-                    console.print("[red]Could not determine the current tree ID.[/red]")
-                    continue
-
-                # Sanitize the new name
-                sanitized_name = re.sub(r'[^a-zA-Z0-9_.-]+', '-', new_name).lower()
-                
-                try:
-                    rename_tree(old_tree_id, sanitized_name, console, manual=True)
-                    console.print(Panel(f"Tree renamed to: {sanitized_name}", title="[bold]Agent Tree[/bold]", border_style="magenta"))
-                except Exception as e:
-                    console.print(f"[red]Error renaming tree: {e}[/red]")
-                continue
-
             elif user_input.startswith("/quit"):
                 # Handle quit command locally
                 console.print("[cyan]Quitting chat...[/cyan]")
@@ -799,20 +672,6 @@ def main():
                 continue
 
             client.send_message(user_input)
-
-            # After message is sent, check for short_recap and rename tree
-            if client.short_recap:
-                old_tree_id = os.environ.get('EG_TREE_ID')
-                manual_rename_marker = Path('.egg/agents') / old_tree_id / '.manual_rename'
-                if old_tree_id and not manual_rename_marker.exists():
-                    sanitized_recap = re.sub(r'[^a-zA-Z0-9_.-]+', '-', client.short_recap).lower()
-                    if old_tree_id != sanitized_recap:
-                        try:
-                            rename_tree(old_tree_id, sanitized_recap, console)
-                            console.print(Panel(f"Tree automatically renamed to: {sanitized_recap}", title="[bold]Agent Tree[/bold]", border_style="magenta"))
-                        except Exception as e:
-                            console.print(f"[red]Error auto-renaming tree: {e}[/red]")
-                client.short_recap = None # Reset recap
 
         except KeyboardInterrupt:
             console.print("[bold yellow]\nInterrupted.[/bold yellow]")

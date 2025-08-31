@@ -36,11 +36,6 @@ Run
 # starts/attaches a tmux session for a fresh agent tree
 ./chat.sh
 
-# use a specific tree id (attaches/creates):
-./chat.sh --tree 1717090000
-```
-When Egg starts, it prints the session name (egg-tree-<TREE_ID>) and opens the UI in tmux.
-
 
 ## Configure models and keys
 
@@ -90,10 +85,6 @@ Agent orchestration
 - /spawn [file.md?] [text] — open a child agent using the given context
 - /spawn_auto [file.md?] [text] — same, but auto-approve tool calls (EG_YES_TOOL_FLAG=1)
 - /wait <child_id|...|any|all> — wait for specific children; any returns on first completion
-- /tree — list children with statuses and return values (pretty and raw views)
-- /tree list — list existing trees; /tree use <id> — switch current tree for this UI
-- /attach <tree_id> [agent_id] — jump your tmux client to a tree (and optionally a window)
-- /o [list|<tree_id>] — attach/switch to a tree’s tmux session from the shell
 
 Housekeeping
 - /toggleYesToolFlag — toggle per‑agent auto‑approval for tool calls
@@ -105,19 +96,6 @@ Housekeeping
 - The initial context is the concatenation of optional file.md contents and extra text. If the path starts with global/, Egg will load it from <repo>/global_commands/.
 - Each sub‑agent is instructed to finish with /popContext <return_value>.
 - On finish it writes result.json and state.json in .egg/agents/<tree>/<parent>/children/<child_id>/, and notifies the parent; /wait will pick it up.
-
-Filesystem layout (per tree)
-```
-.egg/agents/<TREE_ID>/
-  root/
-    children/
-      label-001/
-        state.json
-        result.json (when done)
-        init_context.txt
-        messages.json (seed)
-```
-
 
 ## Streaming, display, and Markdown
 - Rich Markdown rendering is used when Egg detects Markdown-like content.
@@ -182,13 +160,6 @@ Export to HTML
   ```
 - Tavily search: set TAVILY_API_KEY in .env.
 - Large outputs: use $$ to avoid polluting context, or answer “n” when asked to include full output.
-
-
-## Notes for power users
-- Trees: /tree list and /tree use let you hop between agent trees from the same UI.
-- Attach: /attach <tree> [agent_id] jumps to the tmux session/window; /o list shows available trees.
-- State propagation: The currently selected model is persisted so children inherit it even across new panes.
-- Safety: bash tool has a 60s timeout; file editors guard against editing system directories.
 
 
 Made with care by Entropy Gradient. Have fun hatching agents.
