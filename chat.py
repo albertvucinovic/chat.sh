@@ -277,14 +277,18 @@ def main():
                     except Exception:
                         output_clean = output
 
-                    # Check if output is long (more than 800 lines)
+                    # Check if output is long (more than 800 lines or more than 100,000 characters)
                     line_count = len(output_clean.split('\n'))
-                    is_long_output = line_count > 800
+                    char_count = len(output_clean)
+                    is_long_output = line_count > 800 or char_count > 100000
                     user_wants_full_output = True
                     
                     # Ask user for confirmation if output is long
                     if is_long_output:
-                        console.print(f"[yellow]Warning: Output is {line_count} lines long (over 800 lines).[/yellow]")
+                        if line_count > 800:
+                            console.print(f"[yellow]Warning: Output is {line_count} lines long (over 800 lines).[/yellow]")
+                        elif char_count > 100000:
+                            console.print(f"[yellow]Warning: Output is {char_count} characters long (over 100,000 characters).[/yellow]")
                         while True:
                             response = input("Include full output in context? [y/n] ").strip().lower()
                             if response in ('y', 'n'):
@@ -322,7 +326,7 @@ def main():
                             except Exception:
                                 saved_path = None
                         preview = output_clean[:MAX_PREVIEW] + "\n... [truncated]"
-                    elif is_long_output:
+                    elif is_long_output and line_count > 800:
                         # User doesn't want long output, truncate to 100 lines
                         lines = output_clean.split('\n')
                         preview = '\n'.join(lines[:100]) + f"\n... [truncated, {line_count - 100} more lines]"

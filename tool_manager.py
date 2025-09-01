@@ -757,6 +757,44 @@ def handle_tool_call(client, call: Dict, display_call: bool = True):
         final_output = outputs[0]
     else:
         final_output = "\n\n==== SPLIT RESULTS ===\n\n".join(outputs)
+    
+    # Check if output is long (more than 800 lines or more than 100,000 characters)
+    line_count = len(final_output.split('\n'))
+    char_count = len(final_output)
+    is_long_output = line_count > 800 or char_count > 100000
+    
+    if is_long_output:
+        console = getattr(client, 'console', None)
+        if console:
+            if line_count > 800:
+                console.print(f"[yellow]Warning: Tool output is {line_count} lines long (over 800 lines).[/yellow]")
+            elif char_count > 100000:
+                console.print(f"[yellow]Warning: Tool output is {char_count} characters long (over 100,000 characters).[/yellow]")
+            try:
+                while True:
+                    response = input("Include full output in context? [y/n] ").strip().lower()
+                    if response in ('y', 'n'):
+                        break
+                    console.print("Invalid input. Please enter y or n")
+                
+                if response == 'n':
+                    # For tool outputs, we'll use a smaller preview size to keep context manageable
+                    MAX_PREVIEW = 15000  # characters
+                    if len(final_output) > MAX_PREVIEW:
+                        final_output = final_output[:MAX_PREVIEW] + "\n... [truncated]"
+                    elif line_count > 800:
+                        # Truncate to 100 lines if it's too many lines
+                        lines = final_output.split('\n')
+                        final_output = '\n'.join(lines[:100]) + f"\n... [truncated, {line_count - 100} more lines]"
+            except:
+                # If there's any issue with user input, default to truncation
+                MAX_PREVIEW = 15000  # characters
+                if len(final_output) > MAX_PREVIEW:
+                    final_output = final_output[:MAX_PREVIEW] + "\n... [truncated]"
+                elif line_count > 800:
+                    # Truncate to 100 lines if it's too many lines
+                    lines = final_output.split('\n')
+                    final_output = '\n'.join(lines[:100]) + f"\n... [truncated, {line_count - 100} more lines]"
 
     tool_msg = {"role": "tool", "name": fn_name, "tool_call_id": call.get("id"), "content": final_output}
     client.messages.append(tool_msg)
