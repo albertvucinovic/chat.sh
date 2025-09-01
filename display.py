@@ -359,6 +359,14 @@ class DisplayManager:
                 self.console.print(Panel(content_renderable, title=title, border_style=border_style, box=self.client.boxStyle), crop=False)
             elif role == "assistant":
                 self.console.print(self._create_assistant_panel(msg))
+                # Display reasoning content if available and enabled
+                if self.client.show_thinking and msg.get("reasoning_content"):
+                    self.console.print(Panel(
+                        Text(msg["reasoning_content"], justify="left", no_wrap=False, overflow="fold"),
+                        title="[bold magenta]Reasoning[/bold magenta]",
+                        border_style="magenta",
+                        box=self.client.boxStyle
+                    ))
             elif role == "tool":
                 output_renderable = Text(msg.get("content", "") or "[No output]", no_wrap=False, overflow="fold")
                 border_style = "green" if self.client.borders_enabled else "none"

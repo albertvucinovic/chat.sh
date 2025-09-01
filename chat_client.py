@@ -626,6 +626,12 @@ class ChatClient:
             if complete_message: assistant_msg["content"] = complete_message
             if tool_calls_buf: assistant_msg["tool_calls"] = list(tool_calls_buf.values())
             
+            # Add reasoning content if available
+            if reasoning_parts:
+                reasoning_content = "".join(reasoning_parts)
+                if reasoning_content.strip():
+                    assistant_msg["reasoning_content"] = reasoning_content
+            
             # Add the model key to the assistant message for persistent storage
             assistant_msg["model_key"] = self.current_model_key
             
