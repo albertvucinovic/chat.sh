@@ -682,6 +682,32 @@ class ChatClient:
         status = "ON" if self.show_thinking else "OFF"
         self.console.print(f"Thinking display is now {status}")
 
+    def drop_last_exchange(self) -> str:
+        """Drop the last meaningful exchange from the conversation and redraw."""
+        if len(self.messages) <= 1:  # Keep at least the system message
+            return "No messages to drop."
+        
+        removed_msg = self.messages.pop()
+        self._redraw_conversation()
+        return f"Dropped last {removed_msg.get('role', 'message')}."
+        
+        # Redraw the conversation
+        self._redraw_conversation()
+        
+        return f"Dropped last exchange ({len(removed_messages)} messages)."
+
+    def _redraw_conversation(self):
+        """Clear the display and redraw the entire conversation."""
+        # Clear the display
+        self._clear_display()
+        
+        # Redraw all messages
+        for i, msg in enumerate(self.messages):
+            if msg.get("role") == "system" and i == 0:
+                self.display_manager.render_system_prompt(msg["content"])
+            else:
+                self.display_manager.render_message(msg)
+
     def get_border_style(self, style: str) -> str:
         return style if self.borders_enabled else "none"
 

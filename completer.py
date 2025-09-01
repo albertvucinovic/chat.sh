@@ -16,7 +16,7 @@ class PtkCompleter(Completer):
     def __init__(self, client: "ChatClient"):
         self.client = client
         self.all_commands = [
-            "/model", "/popContext", "/toggleYesToolFlag", "/toggleThinkingDisplay", "/o", "/spawn", "/spawn_auto", "/wait", "/tree", "/attach", "/updateAllModels", "/search", "/toggleEscape", "/exportHtml"
+            "/model", "/popContext", "/toggleYesToolFlag", "/toggleThinkingDisplay", "/o", "/spawn", "/spawn_auto", "/wait", "/tree", "/attach", "/updateAllModels", "/search", "/toggleEscape", "/exportHtml", "/drop"
         ]
 
     def _get_filesystem_suggestions(self, prefix: str) -> List[str]:
@@ -294,6 +294,9 @@ class PtkCompleter(Completer):
             return
 
         elif text.startswith("/toggleThinkingDisplay"):
+            return
+
+        elif text.startswith("/drop"):
             return
 
         elif text.startswith("/tree use "):

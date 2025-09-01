@@ -175,6 +175,7 @@ def main():
             "[bold]/toggleEscape[/bold] - Toggle display of tool call arguments between escaped and unescaped.\n"
             "[bold]/exportHtml <filename.html>[/bold] - Export current chat as a visually striking HTML page.\n"
             "[bold]/updateAllModels <provider>[/bold] - Fetch and cache the provider's full model catalog to all-models.json.\n"
+            "[bold]/drop[/bold] - Drop the last conversation exchange and redraw.\n"
             "[bold]/quit[/bold] - Quit the chat application.",
             title="[bold]Welcome[/bold]",
             border_style=client.get_border_style("magenta")
@@ -457,6 +458,15 @@ def main():
 
             elif user_input.startswith("/toggleThinkingDisplay"):
                 client.toggle_thinking_display()
+                continue
+
+            elif user_input.startswith("/drop"):
+                # Handle drop command locally
+                try:
+                    result = client.drop_last_exchange()
+                    console.print(Panel(result, title="[bold cyan]Drop Context[/bold cyan]", border_style="cyan", box=client.boxStyle))
+                except Exception as e:
+                    console.print(Panel(f"Drop failed: {e}", title="[bold red]Drop Error[/bold red]", border_style="red", box=client.boxStyle))
                 continue
 
             elif user_input.startswith("/spawn"):
