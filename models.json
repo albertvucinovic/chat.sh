@@ -21,7 +21,10 @@
         },
         "GPT 5 Mini": {
           "model_name": "gpt-5-mini",
-          "max_tokens": 400000
+          "max_tokens": 400000,
+	  "parameters": {
+             "reasoning_effort": "high"
+	  }
         },
         "OpenAI o3-mini": {
           "model_name": "o3-mini",
@@ -37,7 +40,10 @@
         },
         "GPT 5 Nano": {
           "model_name": "gpt-5-nano",
-          "max_tokens": 32000
+          "max_tokens": 32000,
+	  "parameters": {
+            "reasoning_effort": "high"
+	  }
         }
       }
     },
