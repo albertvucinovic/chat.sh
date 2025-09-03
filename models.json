@@ -4,6 +4,13 @@
       "api_base": "https://api.openai.com/v1/chat/completions",
       "api_key_env": "OPENAI_API_KEY",
       "models": {
+	"GPT 5 high": {
+	  "model_name": "gpt-5",
+	  "max_tokens": 400000,
+          "parameters": {
+            "reasoning_effort": "high"
+	  }
+	},
         "GPT 5": {
           "model_name": "gpt-5",
           "max_tokens": 400000
